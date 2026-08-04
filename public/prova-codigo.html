@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FórmulaVest | Entrar na prova</title>
+  <link rel="stylesheet" href="/professor.css" />
+  <script src="/prova-codigo.js" defer></script>
+</head>
+<body>
+  <div class="page-shell" style="grid-template-columns: 1fr;">
+    <main class="main-content">
+      <section class="card" style="max-width: 560px; margin: 0 auto;">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Prova ao vivo</p>
+            <h3>Entre com o código da prova</h3>
+          </div>
+        </div>
+        <div class="prova-form">
+          <label>
+            <span>Código da prova</span>
+            <input id="codigo-prova" type="text" placeholder="EXEMPLO" />
+          </label>
+          <button id="entrar-prova-btn" class="btn btn-primary" type="button">Entrar na prova</button>
+          <p id="status-text" class="small" style="color: var(--muted);">Digite o código fornecido pelo professor.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

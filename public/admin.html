@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FormulaVest | Admin</title>
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="stylesheet" href="/admin.css" />
+  <script src="/admin.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand-block" href="/">
+        <span class="brand-icon">FV</span>
+        <span>
+          <strong>FormulaVest</strong>
+          <small>Painel administrativo</small>
+        </span>
+      </a>
+
+      <nav class="nav-links" aria-label="Navegacao principal">
+        <button class="nav-btn active" data-section="dashboard" type="button"><span>Dashboard</span></button>
+        <button class="nav-btn" data-section="usuarios" type="button"><span>Usuarios</span></button>
+        <button class="nav-btn" data-section="professores" type="button"><span>Professores</span></button>
+        <button class="nav-btn" data-section="estrutura" type="button"><span>Estrutura</span></button>
+        <button class="nav-btn" data-section="provas" type="button"><span>Provas</span></button>
+        <button class="nav-btn master-only hidden" data-section="empresas" type="button"><span>Empresas</span></button>
+        <button class="nav-btn master-only hidden" data-section="admins" type="button"><span>Admins</span></button>
+      </nav>
+
+      <div class="sidebar-card">
+        <p id="admin-name">Carregando perfil...</p>
+        <span id="admin-role">Validando permissao</span>
+      </div>
+
+      <button id="logout-btn" class="btn btn-danger btn-full" type="button">Sair</button>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Administracao</p>
+          <h1 id="page-title">Central de gestao</h1>
+        </div>
+        <div class="topbar-actions">
+          <span class="status-pill" id="sync-status">Online</span>
+          <button class="btn btn-secondary" type="button" data-refresh>Atualizar</button>
+        </div>
+      </header>
+
+      <div id="toast" class="toast hidden" role="status"></div>
+
+      <section id="dashboard" class="pagina" data-title="Central de gestao">
+        <div class="card hero-panel">
+          <div class="hero-copy">
+            <p class="eyebrow">Resumo geral</p>
+            <h2>Controle rapido da plataforma</h2>
+            <p>Acompanhe usuarios, provas, desempenho e estrutura escolar sem sair do painel.</p>
+          </div>
+          <div class="hero-metrics">
+            <div class="metric-card master-only hidden">
+              <strong id="totalEmpresas">0</strong>
+              <span>Empresas</span>
+            </div>
+            <div class="metric-card">
+              <strong id="totalUsuarios">0</strong>
+              <span>Usuarios</span>
+            </div>
+            <div class="metric-card">
+              <strong id="totalProvas">0</strong>
+              <span>Provas</span>
+            </div>
+            <div class="metric-card">
+              <strong id="media">0</strong>
+              <span>Media de acertos</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="dashboard-grid">
+          <div class="card">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Ranking</p>
+                <h2>Desempenho por aluno</h2>
+              </div>
+              <span class="pill">Acertos</span>
+            </div>
+            <div id="ranking-bars" class="ranking-bars"></div>
+          </div>
+
+          <div class="card">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Atalhos</p>
+                <h2>Acoes rapidas</h2>
+              </div>
+            </div>
+            <div class="quick-list">
+              <button class="quick-item" data-section="usuarios" type="button">
+                <strong>Gerenciar usuarios</strong>
+                <span>Criar, editar, banir e excluir contas.</span>
+              </button>
+              <button class="quick-item" data-section="estrutura" type="button">
+                <strong>Organizar estrutura</strong>
+                <span>Escolas, periodos e salas.</span>
+              </button>
+              <button class="quick-item" data-section="provas" type="button">
+                <strong>Ver historico</strong>
+                <span>Acompanhar provas registradas.</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="usuarios" class="pagina hidden" data-title="Usuarios">
+        <div class="content-grid">
+          <div class="card form-card">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Cadastro</p>
+                <h2>Novo usuario</h2>
+              </div>
+            </div>
+            <form id="form-criar-usuario" class="form-grid">
+              <label>
+                <span>Nome</span>
+                <input id="novoNome" autocomplete="name" required minlength="3" />
+              </label>
+              <label>
+                <span>Email</span>
+                <input id="novoEmail" type="email" autocomplete="email" required />
+              </label>
+              <label>
+                <span>Senha</span>
+                <input id="novaSenha" type="password" autocomplete="new-password" required minlength="8" />
+              </label>
+              <label>
+                <span>Funcao</span>
+                <select id="novoRole">
+                  <option value="aluno">Aluno</option>
+                  <option value="professor">Professor</option>
+                  <option value="coordenador">Coordenador</option>
+                  <option value="diretor">Diretor</option>
+                  <option value="empresa_admin">Admin da empresa</option>
+                </select>
+              </label>
+              <label>
+                <span>Escola</span>
+                <select id="novoEscola">
+                  <option value="">Sem escola</option>
+                </select>
+              </label>
+              <label>
+                <span>Sala</span>
+                <select id="novoSala">
+                  <option value="">Sem sala</option>
+                </select>
+              </label>
+              <div class="form-actions">
+                <button class="btn btn-primary" type="submit">Criar usuario</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="card form-card">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Cadastro rapido</p>
+                <h2>Adicionar aluno</h2>
+              </div>
+            </div>
+            <form id="form-criar-aluno" class="form-grid">
+              <label>
+                <span>Nome do aluno</span>
+                <input id="alunoNome" required minlength="3" />
+              </label>
+              <label>
+                <span>Email</span>
+                <input id="alunoEmail" type="email" />
+              </label>
+              <label>
+                <span>Senha</span>
+                <input id="alunoSenha" type="password" placeholder="Opcional" minlength="8" />
+              </label>
+              <label>
+                <span>Periodo</span>
+                <select id="alunoPeriodo" required></select>
+              </label>
+              <label>
+                <span>Sala</span>
+                <select id="alunoSala" required></select>
+              </label>
+              <div class="form-actions">
+                <button class="btn btn-primary" type="submit">Criar aluno</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="card form-card">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Importacao em massa</p>
+                <h2>Planilha de alunos</h2>
+              </div>
+            </div>
+            <form id="form-importar-alunos" class="compact-form">
+              <label>
+                <span>Arquivo CSV</span>
+                <input id="arquivoAlunos" type="file" accept=".csv,text/csv" required />
+              </label>
+              <p class="help-text">Use colunas com os nomes: nome do aluno, sala, periodo, email e senha. A primeira linha é lida como cabeçalho.</p>
+              <div class="form-actions">
+                <button class="btn btn-secondary" type="submit">Importar alunos</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="card">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Contas</p>
+                <h2>Usuarios cadastrados</h2>
+              </div>
+              <span class="pill" id="usuarios-count">0 contas</span>
+            </div>
+            <div class="toolbar">
+              <input id="buscaUsuarios" type="search" placeholder="Buscar por nome, email ou funcao" />
+            </div>
+            <div id="listaUsuarios" class="list-stack"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="professores" class="pagina hidden" data-title="Professores">
+        <div class="card">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Professores</p>
+              <h2>Gerenciar professores</h2>
+            </div>
+            <span class="pill" id="professores-count">0 professores</span>
+          </div>
+          <div class="toolbar">
+            <input id="buscaProfessores" type="search" placeholder="Buscar por nome, email ou sala" />
+          </div>
+          <div id="listaProfessores" class="list-stack"></div>
+        </div>
+      </section>
+
+      <section id="estrutura" class="pagina hidden" data-title="Estrutura">
+        <div class="structure-grid">
+          <div class="card form-card">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Escolas</p>
+                <h2>Nova escola</h2>
+              </div>
+            </div>
+            <form id="form-criar-escola" class="compact-form">
+              <label>
+                <span>Nome da escola</span>
+                <input id="nomeEscola" required minlength="2" />
+              </label>
+              <div class="form-actions">
+                <button class="btn btn-primary" type="submit">Criar escola</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="card form-card">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Periodos</p>
+                <h2>Novo periodo</h2>
+              </div>
+            </div>
+            <form id="form-criar-periodo" class="compact-form">
+              <label>
+                <span>Escola</span>
+                <select id="periodoEscola" required></select>
+              </label>
+              <label>
+                <span>Nome do periodo</span>
+                <input id="nomePeriodo" placeholder="Ex.: 3o ano - Manha" required minlength="2" />
+              </label>
+              <div class="form-actions">
+                <button class="btn btn-primary" type="submit">Criar periodo</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="card form-card">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Salas</p>
+                <h2>Nova sala</h2>
+              </div>
+            </div>
+            <form id="form-criar-sala" class="compact-form">
+              <label>
+                <span>Periodo</span>
+                <select id="salaPeriodo" required></select>
+              </label>
+              <label>
+                <span>Nome da sala</span>
+                <input id="nomeSala" placeholder="Ex.: Turma A" required minlength="1" />
+              </label>
+              <div class="form-actions">
+                <button class="btn btn-primary" type="submit">Criar sala</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Rede</p>
+              <h2>Escolas, periodos e salas</h2>
+            </div>
+            <span class="pill" id="escolas-count">0 escolas</span>
+          </div>
+          <div id="listaEstrutura" class="structure-list"></div>
+        </div>
+      </section>
+
+      <section id="provas" class="pagina hidden" data-title="Provas">
+        <div class="card">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Historico</p>
+              <h2>Provas registradas</h2>
+            </div>
+            <span class="pill" id="provas-count">0 provas</span>
+          </div>
+          <div class="toolbar">
+            <input id="buscaProvas" type="search" placeholder="Buscar por aluno ou titulo" />
+          </div>
+          <div id="listaProvas" class="list-stack"></div>
+        </div>
+      </section>
+
+      <section id="empresas" class="pagina hidden master-only" data-title="Empresas">
+        <div class="content-grid">
+          <div class="card form-card">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Cadastro</p>
+                <h2>Nova empresa</h2>
+              </div>
+            </div>
+            <form id="form-criar-empresa" class="compact-form">
+              <label>
+                <span>Nome da empresa</span>
+                <input id="empresaNome" required minlength="2" />
+              </label>
+              <div class="form-actions">
+                <button class="btn btn-primary" type="submit">Criar empresa</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="card">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Empresas</p>
+                <h2>Empresas cadastradas</h2>
+              </div>
+              <span class="pill" id="empresas-count">0 empresas</span>
+            </div>
+            <div id="listaEmpresas" class="list-stack"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="admins" class="pagina hidden master-only" data-title="Admins de empresa">
+        <div class="card form-card">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Permissoes</p>
+              <h2>Criar admin da empresa</h2>
+            </div>
+          </div>
+          <form id="form-criar-admin" class="form-grid">
+            <label>
+              <span>Nome</span>
+              <input id="adminNome" required minlength="3" />
+            </label>
+            <label>
+              <span>Email</span>
+              <input id="adminEmail" type="email" required />
+            </label>
+            <label>
+              <span>Senha</span>
+              <input id="adminSenha" type="password" required minlength="8" />
+            </label>
+            <label>
+              <span>Empresa</span>
+              <select id="adminEmpresaId" required></select>
+            </label>
+            <div class="form-actions">
+              <button class="btn btn-primary" type="submit">Criar admin</button>
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

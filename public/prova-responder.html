@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FórmulaVest | Responder prova</title>
+  <link rel="stylesheet" href="/professor.css" />
+  <script src="/prova-responder.js" defer></script>
+</head>
+<body>
+  <div class="page-shell" style="grid-template-columns: 1fr;">
+    <main class="main-content">
+      <section class="card" style="max-width: 760px; margin: 0 auto;">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Responder prova</p>
+            <h3 id="titulo-prova">Carregando...</h3>
+          </div>
+          <div id="tempo-restante" class="status-pill">--</div>
+        </div>
+        <div id="questoes-container" class="questoes-container"></div>
+        <div class="actions-row" style="justify-content: flex-start; margin-top: 14px;">
+          <button id="finalizar-btn" class="btn btn-primary" type="button">Finalizar prova</button>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

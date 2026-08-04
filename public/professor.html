@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FórmulaVest | Professor</title>
+  <link rel="stylesheet" href="/professor.css" />
+  <script src="/professor.js" defer></script>
+</head>
+<body>
+  <div class="page-shell">
+    <aside class="sidebar">
+      <div class="brand-block">
+        <div class="brand-icon">🎓</div>
+        <div>
+          <h1>FórmulaVest</h1>
+          <p>Modo professor</p>
+        </div>
+      </div>
+
+      <button id="logout-btn" class="btn btn-danger" type="button">Sair</button>
+
+      <nav class="professor-menu" aria-label="Menu do professor">
+        <button class="menu-btn active" data-section="turmas" type="button">Turmas</button>
+        <button class="menu-btn" data-section="nova-prova" type="button">Nova prova</button>
+        <button class="menu-btn" data-section="provas" type="button">Minhas provas</button>
+        <button class="menu-btn" data-section="ao-vivo" type="button">Ao vivo</button>
+      </nav>
+
+      <div class="sidebar-card">
+        <p>Crie quizzes ao estilo Kahoot</p>
+        <span>Publique, gere um código e faça a turma entrar em segundos.</span>
+      </div>
+
+      <a class="btn btn-secondary" href="/prova-codigo.html">Entrar com código</a>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Painel do professor</p>
+          <h2>Crie provas interativas e transmita ao vivo</h2>
+        </div>
+        <div class="topbar-actions">
+          <a class="btn btn-secondary small" href="/index.html">Voltar ao início</a>
+          <div id="status-pill" class="status-pill">Pronto para criar</div>
+        </div>
+      </header>
+
+      <section class="card hero-panel">
+        <div class="hero-copy">
+          <p class="eyebrow">Experiência exclusiva</p>
+          <h3>Monte aulas mais dinâmicas com provas, código da sala e feedback instantâneo.</h3>
+          <p>Crie questões em poucos passos, publique uma prova, acompanhe o placar e mantenha a turma engajada em tempo real.</p>
+        </div>
+        <div class="hero-metrics">
+          <div class="metric-card">
+            <strong>Ao vivo</strong>
+            <span>Transmissão de perguntas</span>
+          </div>
+          <div class="metric-card">
+            <strong>Código da sala</strong>
+            <span>Entrada rápida dos alunos</span>
+          </div>
+          <div class="metric-card">
+            <strong>Placar</strong>
+            <span>Ranking e desempenho</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="turmas" class="page-section">
+        <section class="card">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Gerenciar Turmas</p>
+              <h3>Períodos e salas</h3>
+            </div>
+          </div>
+          <div id="turmas-container" class="turmas-container"></div>
+          <div class="form-grid" style="margin-top:12px;">
+            <label>
+              <span>Período</span>
+              <select id="periodos-select"></select>
+            </label>
+            <label>
+              <span>Salas</span>
+              <select id="salas-select"></select>
+            </label>
+          </div>
+          <div class="form-grid" style="margin-top:12px;">
+            <label>
+              <span>Nome da sala</span>
+              <input id="nova-sala-nome" placeholder="Ex.: 2ºA" />
+            </label>
+          </div>
+          <div class="actions-row" style="margin-top:8px;">
+            <button id="criar-sala-btn" class="btn btn-primary" type="button">Criar sala</button>
+            <button id="export-periodo-btn" class="btn btn-secondary" type="button">Exportar por período</button>
+            <button id="export-sala-btn" class="btn btn-secondary" type="button">Exportar por sala</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="nova-prova" class="page-section hidden">
+        <section class="card">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Nova prova</p>
+              <h3>Monte sua prova personalizada</h3>
+            </div>
+          </div>
+
+          <form id="prova-form" class="prova-form">
+          <div class="form-grid">
+            <label>
+              <span>Título da prova</span>
+              <input id="titulo-prova" name="titulo" type="text" required />
+            </label>
+            <label>
+              <span>Tempo (minutos)</span>
+              <input id="tempo-prova" name="tempo" type="number" min="1" value="10" required />
+            </label>
+          </div>
+
+          <div class="form-grid">
+            <label>
+              <span>Sala</span>
+              <select id="prova-sala-select" name="sala_id" required>
+                <option value="">Selecione uma sala</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="questoes-container" class="questoes-container"></div>
+
+          <div class="actions-row">
+            <button id="add-question-btn" class="btn btn-secondary" type="button">+ Adicionar questão</button>
+            <button id="salvar-prova-btn" class="btn btn-primary" type="submit">Salvar prova</button>
+          </div>
+        </form>
+        </section>
+      </section>
+
+      <section id="provas" class="page-section hidden">
+        <section class="card">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Provas criadas</p>
+              <h3>Gerencie suas provas</h3>
+            </div>
+          </div>
+          <div id="provas-list" class="provas-list"></div>
+        </section>
+      </section>
+
+      <section id="ao-vivo" class="page-section hidden">
+        <section id="sessao-ao-vivo" class="card">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Rodada ao vivo</p>
+            <h3>Controle a prova em tempo real</h3>
+          </div>
+          <div class="actions-row">
+            <button id="fullscreen-btn" class="btn btn-secondary small fullscreen-toggle" type="button">⛶ Tela cheia</button>
+            <div id="live-code-pill" class="status-pill">Código</div>
+          </div>
+        </div>
+
+        <div class="live-grid">
+          <div class="live-main">
+            <div id="live-round-card" class="round-card"></div>
+            <div class="live-actions">
+              <button id="start-round-btn" class="btn btn-primary" type="button">Iniciar rodada</button>
+              <button id="next-round-btn" class="btn btn-secondary" type="button">Próxima pergunta</button>
+            </div>
+          </div>
+
+          <div class="live-scoreboard">
+            <div class="section-title" style="margin-bottom: 10px;">
+              <h4>Placar ao vivo</h4>
+              <span class="status-pill">Live</span>
+            </div>
+            <div id="ranking-live" class="ranking-live"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

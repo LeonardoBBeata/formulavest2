@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <title>FórmulaVest</title>
+  <link rel="stylesheet" href="login.css">
+  <script src="login.js" defer></script>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- LOGIN -->
+  <div id="login-box" class="card">
+    <h1>Entrar</h1>
+
+    <input id="login-email" type="email" placeholder="Email">
+    <input id="login-senha" type="password" placeholder="Senha">
+
+    <!-- ESCOLHA TIPO -->
+    <div class="login-tipo">
+      <label>
+        <input
+          type="radio"
+          name="tipo-login"
+          value="aluno"
+          checked
+        >
+        Usuário / Aluno
+      </label>
+
+      <label>
+        <input
+          type="radio"
+          name="tipo-login"
+          value="admin"
+        >
+        Administrador
+      </label>
+      <label>
+        <input
+          type="radio"
+          name="tipo-login"
+          value="professor"
+        >
+        Professor
+      </label>
+    </div>
+
+    <button id="login-btn">
+      Entrar
+    </button>
+
+    <p class="link" id="abrir-cadastro">
+      Criar conta
+    </p>
+
+    <p class="link" id="abrir-recuperar">
+      Esqueci minha senha
+    </p>
+  </div>
+
+
+  <!-- CONFIRMAR LOGIN -->
+  <div id="codigo-login-box" class="card hidden">
+    <h1>Confirmar Login</h1>
+
+    <input
+      id="codigo-login"
+      placeholder="Código recebido"
+    >
+
+    <button id="confirmar-login-btn">
+      Confirmar
+    </button>
+  </div>
+
+
+  <!-- CADASTRO -->
+  <div id="cadastro-box" class="card hidden">
+    <h1>Criar conta</h1>
+
+    <input
+      id="cadastro-user"
+      placeholder="Usuário"
+    >
+
+    <input
+      id="cadastro-email"
+      placeholder="Email"
+    >
+
+    <input
+      id="cadastro-senha"
+      type="password"
+      placeholder="Senha"
+    >
+
+    <button id="cadastro-btn">
+      Cadastrar
+    </button>
+
+    <p class="link voltar-login">
+      Voltar
+    </p>
+  </div>
+
+
+  <!-- CONFIRMAR CADASTRO -->
+  <div id="codigo-cadastro-box" class="card hidden">
+    <h1>Confirmar cadastro</h1>
+
+    <div id="codigo-aviso" class="codigo-aviso hidden"></div>
+
+    <input
+      id="codigo-cadastro"
+      placeholder="Código"
+    >
+
+    <button id="confirmar-cadastro-btn">
+      Confirmar
+    </button>
+  </div>
+
+
+  <!-- RECUPERAR SENHA -->
+  <div id="recuperar-box" class="card hidden">
+    <h1>Recuperar senha</h1>
+
+    <input
+      id="recuperar-email"
+      placeholder="Seu email"
+    >
+
+    <button id="recuperar-btn">
+      Enviar link
+    </button>
+
+    <p class="link voltar-login">
+      Voltar
+    </p>
+  </div>
+
+</div>
+
+</body>
+</html>

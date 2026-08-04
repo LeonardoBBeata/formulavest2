@@ -1,0 +1,115 @@
+:root {
+  color-scheme: dark;
+  --bg: #07111f;
+  --card: rgba(10, 19, 35, 0.9);
+  --text: #f8fafc;
+  --muted: #cbd5e1;
+  --accent: #4f8cff;
+  --accent-2: #8b5cf6;
+  --border: rgba(148, 163, 184, 0.24);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  color: var(--text);
+  background: linear-gradient(135deg, #07111f 0%, #0f172a 45%, #172554 100%);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+.bg-orb {
+  position: fixed;
+  border-radius: 999px;
+  filter: blur(24px);
+  opacity: 0.35;
+  pointer-events: none;
+}
+.orb-1 { width: 240px; height: 240px; background: var(--accent); top: -60px; right: -40px; }
+.orb-2 { width: 280px; height: 280px; background: var(--accent-2); bottom: -80px; left: -70px; }
+
+.hero-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+}
+
+.nav-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0 24px;
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+.brand-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+.nav-link { color: var(--text); text-decoration: none; padding: 10px 14px; border: 1px solid var(--border); border-radius: 999px; }
+
+.hero-card {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 20px;
+  padding: 28px;
+  border-radius: 28px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: 0 18px 45px rgba(2, 8, 23, 0.35);
+  backdrop-filter: blur(14px);
+  animation: riseIn 0.7s ease both;
+}
+.hero-copy h1 { font-size: clamp(2rem, 3vw, 3rem); line-height: 1.1; margin: 10px 0; }
+.hero-copy p { color: var(--muted); line-height: 1.7; max-width: 650px; }
+.eyebrow { text-transform: uppercase; letter-spacing: 0.2em; font-size: 0.78rem; color: #93c5fd; }
+.hero-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
+.btn { display: inline-block; padding: 12px 16px; border-radius: 999px; text-decoration: none; font-weight: 700; }
+.btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white; }
+.btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+
+.hero-panel { padding: 18px; border-radius: 20px; background: rgba(255,255,255,0.05); border: 1px solid var(--border); display: flex; flex-direction: column; justify-content: space-between; min-height: 240px; }
+.panel-top { display: flex; justify-content: space-between; align-items: center; color: var(--muted); }
+.panel-metrics { display: grid; gap: 12px; }
+.panel-metrics div { padding: 12px; border-radius: 14px; background: rgba(255,255,255,0.04); }
+.panel-metrics strong { display: block; font-size: 1.15rem; margin-bottom: 4px; }
+
+.features-section { max-width: 1200px; margin: 0 auto; padding: 30px 20px 60px; }
+.section-title { margin-bottom: 18px; }
+.section-title h2 { font-size: clamp(1.4rem, 2vw, 2rem); margin-top: 8px; max-width: 760px; }
+.features-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.feature-card { padding: 20px; border-radius: 20px; background: var(--card); border: 1px solid var(--border); box-shadow: 0 12px 28px rgba(2, 8, 23, 0.22); }
+.feature-card h3 { margin-bottom: 8px; }
+.feature-card p { color: var(--muted); line-height: 1.6; }
+
+.footer { max-width: 1200px; margin: 0 auto; padding: 0 20px 34px; color: var(--muted); text-align: center; }
+
+.install-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 999px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  box-shadow: 0 14px 36px rgba(2,8,23,0.3);
+  z-index: 1200;
+}
+.install-banner button {
+  border: none;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: white;
+  cursor: pointer;
+}
+
+@keyframes riseIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 860px) {
+  .hero-card { grid-template-columns: 1fr; }
+  .features-grid { grid-template-columns: 1fr; }
+}

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Conquistas - FórmulaVest</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="conquistas.css">
+</head>
+<body>
+  <header class="topbar">
+    <h2>🎖️ Conquistas</h2>
+    <a class="btn ghost-btn" href="/perfil.html">Voltar ao Perfil</a>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h3>Suas conquistas</h3>
+      <p class="muted">Colecione badges ao progredir nos simulados e manter seu ritmo de estudos.</p>
+    </section>
+
+    <section id="badges-grid" class="badges-grid card">
+      <!-- badges renderizados aqui -->
+    </section>
+
+    <section id="conquistas-historico" class="card">
+      <h3>Histórico</h3>
+      <div id="hist-list">Carregando...</div>
+    </section>
+  </main>
+
+  <!-- modal detalhe -->
+  <div id="badge-modal" class="badge-modal hidden">
+    <div class="badge-modal-inner">
+      <button id="badge-modal-close" class="modal-close">✕</button>
+      <div id="badge-modal-content"></div>
+    </div>
+  </div>
+
+  <div id="toast-stack" class="toast-stack"></div>
+
+  <script src="conquistas.js" defer></script>
+</body>
+</html>

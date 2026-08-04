@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FórmulaVest</title>
+
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="script.js" defer></script>
+
+  <style>
+    /* bolinha perfil */
+    .profile-circle {
+      position: fixed;
+      top: 15px;
+      right: 15px;
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      background: #2ecc71;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      color: white;
+      z-index: 999;
+    }
+  </style>
+</head>
+
+<body>
+<div id="mobile-overlay" class="mobile-overlay hidden"></div>
+
+<div id="welcome-modal" class="welcome-modal hidden" aria-hidden="true">
+  <div class="welcome-card">
+    <div class="welcome-icon">✨</div>
+    <h2>Bem-vindo ao FórmulaVest</h2>
+    <p>Seu espaço para estudar com foco, acompanhar metas e manter uma rotina mais leve e consistente.</p>
+    <div class="welcome-actions">
+      <button id="welcome-start-btn" type="button">Começar</button>
+      <button id="welcome-dismiss-btn" class="ghost-btn" type="button">Depois</button>
+    </div>
+  </div>
+</div>
+
+<!-- PERFIL BUTTON -->
+<div class="profile-circle" onclick="window.location.href='perfil.html'">
+  👤
+</div>
+
+<!-- TIMER -->
+<div id="timer-bar" style="display:none;">
+  ⏱ Tempo restante: <span id="timer">00:00:00</span>
+</div>
+
+<div class="app-container">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand-block">
+      <div class="brand-icon">📚</div>
+      <div>
+        <h2>FórmulaVest</h2>
+        <p>Plataforma de estudos</p>
+      </div>
+    </div>
+
+    <button id="theme-toggle" class="theme-toggle" type="button">🌙 Escuro</button>
+
+    <ul>
+      <li data-section="inicio" class="active">🏠 Início</li>
+      <li data-section="enem">🧠 Simulado ENEM</li>
+      <li data-section="provao">📘 Provão Paulista</li>
+      <li data-section="conquistas">🎖️ Conquistas</li>
+      <li data-section="estatisticas">📊 Estatísticas</li>
+      <li data-section="ranking">🏆 Ranking</li>
+      <li data-section="redacao">✍️ Redação</li>
+      <li id="link-professor" class="hidden"><a href="/professor.html" style="color: inherit; text-decoration: none; display: block;">🎓 Tela do professor</a></li>
+    </ul>
+
+    <div class="sidebar-card">
+      <p>Seu estudo, organizado.</p>
+      <small>Mantenha foco, acompanhe evolução e conquiste metas todos os dias.</small>
+    </div>
+
+    <button id="logout-btn">Sair</button>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main-content">
+    <div class="topbar">
+      <button id="mobile-menu-btn" class="mobile-menu-btn" type="button" aria-label="Alternar menu lateral" aria-expanded="true">☰</button>
+      <div class="topbar-pill">Seu espaço de estudo em dia</div>
+    </div>
+
+    <section id="inicio" class="section">
+      <section class="hero-card card">
+        <div class="hero-content">
+          <p class="eyebrow">Plataforma de estudos inteligente</p>
+          <h1>Pratique com foco, acompanhe sua evolução e conquiste sua aprovação.</h1>
+          <p>Organize sua rotina com simulados, metas diárias e um painel de progresso feito para estudar melhor.</p>
+          <div class="hero-actions">
+            <button id="iniciar-foco-btn">⏱ Iniciar foco 25 min</button>
+            <button id="adicionar-meta-btn" class="ghost-btn">+ Adicionar meta</button>
+            <button id="entrar-codigo-btn" class="ghost-btn">Entrar com código</button>
+          </div>
+        </div>
+
+        <div class="hero-stats">
+          <div class="mini-card">
+            <span id="hero-streak">0 dias</span>
+            <small>Streak de estudo</small>
+          </div>
+          <div class="mini-card">
+            <span id="hero-meta">0/3</span>
+            <small>Metas concluídas</small>
+          </div>
+          <div class="mini-card">
+            <span id="hero-dica">Mantenha o ritmo</span>
+            <small>Dica do dia</small>
+          </div>
+          <div class="mini-card focus-card">
+            <span id="focus-timer">25:00</span>
+            <small>Modo foco</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="study-grid">
+        <div class="card plan-card">
+          <div class="section-title">
+            <h3>Plano do dia</h3>
+            <span class="pill">Organize sua rotina</span>
+          </div>
+          <ul id="plano-dia-list" class="plan-list"></ul>
+        </div>
+
+        <div class="card">
+          <div class="section-title">
+            <h3>Entrar com código</h3>
+            <span class="pill">Acesse provas do professor</span>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input id="codigo-prova-mini" placeholder="Código da prova" />
+            <button id="codigo-entrar-mini-btn" class="btn">Entrar</button>
+          </div>
+          <div id="codigo-mini-status" style="margin-top:8px;color:#666;font-size:0.9rem;"></div>
+        </div>
+
+        <div class="card insight-card">
+          <div class="section-title">
+            <h3>Resumo rápido</h3>
+            <span class="pill">Sua evolução</span>
+          </div>
+          <div id="resumo-hoje" class="insight-list"></div>
+        </div>
+      </section>
+
+      <section class="study-grid secondary-grid">
+        <div class="card">
+          <div class="section-title">
+            <h3>Trilha de estudo</h3>
+            <span class="pill">Progresso por área</span>
+          </div>
+          <div class="progress-list">
+            <div class="progress-item">
+              <div class="progress-meta"><span>Matemática</span><span id="prog-matematica">0%</span></div>
+              <div class="progress-bar"><div id="fill-matematica" class="progress-fill"></div></div>
+            </div>
+            <div class="progress-item">
+              <div class="progress-meta"><span>Português</span><span id="prog-portugues">0%</span></div>
+              <div class="progress-bar"><div id="fill-portugues" class="progress-fill"></div></div>
+            </div>
+            <div class="progress-item">
+              <div class="progress-meta"><span>Redação</span><span id="prog-redacao">0%</span></div>
+              <div class="progress-bar"><div id="fill-redacao" class="progress-fill"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-title">
+            <h3>Acompanhamento semanal</h3>
+            <span class="pill">Consistência</span>
+          </div>
+          <div class="weekly-card">
+            <p id="weekly-tip">Sua semana está em andamento. Continue com pequenas sessões diárias.</p>
+            <button id="marcar-sessao-btn">+ Marcar sessão de estudo</button>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <!-- ENEM -->
+    <section id="enem" class="section hidden">
+      <h1>📘 Simulado ENEM</h1>
+
+      <div class="card">
+        <button id="gerar-enem-btn">Gerar ENEM</button>
+      </div>
+
+      <div id="enem-container"></div>
+
+      <button id="finalizar-enem-btn" class="hidden">
+        Finalizar ENEM
+      </button>
+    </section>
+
+    <!-- PROVÃO -->
+    <section id="provao" class="section hidden">
+      <h1>📗 Provão Paulista</h1>
+
+      <div class="card">
+        <button id="gerar-provao-btn">Gerar Provão</button>
+      </div>
+
+      <div id="provao-container"></div>
+
+      <button id="finalizar-provao-btn" class="hidden">
+        Finalizar Provão
+      </button>
+    </section>
+
+    <!-- ESTATÍSTICAS -->
+    <section id="estatisticas" class="section hidden">
+      <h1>📊 Estatísticas</h1>
+
+      <section class="stats-panel card">
+        <div class="stats-header">
+          <div>
+            <p class="eyebrow">Painel de estatísticas</p>
+            <h3>Seu desempenho em destaque</h3>
+          </div>
+          <span id="notif-status" class="notification-pill">Lembretes desativados</span>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <strong id="stat-sessoes">0</strong>
+            <span>Sessões</span>
+          </div>
+          <div class="stat-card">
+            <strong id="stat-metas">0/0</strong>
+            <span>Metas</span>
+          </div>
+          <div class="stat-card">
+            <strong id="stat-acertos">0%</strong>
+            <span>Precisão</span>
+          </div>
+          <div class="stat-card">
+            <strong id="stat-ritmo">0 dias</strong>
+            <span>Ritmo</span>
+          </div>
+        </div>
+        <div class="stats-footer">
+          <button id="notify-btn" class="ghost-btn" type="button">🔔 Ativar lembretes</button>
+          <p id="reminder-summary">Próximo lembrete em 90 minutos</p>
+        </div>
+      </section>
+
+      <div id="dashboard-container"></div>
+
+      <div>
+        <h2>Nível: <span id="nivel-user">1</span></h2>
+        <p>XP: <span id="xp-total">0</span></p>
+
+        <div style="width:100%; background:#ddd;">
+          <div id="xp-bar-fill" style="height:10px;width:0;background:green;"></div>
+        </div>
+
+        <p id="streak-days"></p>
+      </div>
+
+      <canvas id="graficoEvolucao"></canvas>
+    </section>
+
+    <!-- RANKING -->
+    <section id="ranking" class="section hidden">
+      <h1>🏆 Ranking</h1>
+
+      <div id="top3"></div>
+      <div id="ranking-list"></div>
+    </section>
+
+    <!-- REDAÇÃO -->
+    <section id="redacao" class="section hidden">
+      <h1>✍️ Redação ENEM</h1>
+
+      <input id="tema-redacao" placeholder="Tema">
+      <textarea id="texto-redacao" placeholder="Sua redação..."></textarea>
+
+      <button id="enviar-redacao">Corrigir redação</button>
+
+      <div id="feedback-redacao"></div>
+    </section>
+
+  </main>
+</div>
+
+<!-- FINAL SCREEN -->
+<div id="final-screen" class="hidden">
+  <div>
+    <h1>Resultado</h1>
+    <p id="final-text"></p>
+
+    <button onclick="document.getElementById('final-screen').classList.add('hidden')">
+      Fechar
+    </button>
+  </div>
+</div>
+
+<div id="toast-stack" class="toast-stack"></div>
+
+</body>
+</html>

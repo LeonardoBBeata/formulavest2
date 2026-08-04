@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Perfil - FórmulaVest</title>
+
+  <link rel="stylesheet" href="perfil.css">
+</head>
+
+<body>
+
+  <!-- HEADER -->
+  <header class="topbar">
+    <h2>👤 Meu Perfil</h2>
+
+    <div class="avatar" id="avatar-top"></div>
+  </header>
+
+  <!-- CONTAINER -->
+  <main class="container">
+
+    <div class="card">
+
+      <img id="foto-preview" class="foto" src="default.png">
+
+      <input type="file" id="foto-input">
+
+      <input id="nome" placeholder="Nome">
+      <input id="email" placeholder="Email">
+      <input id="senha" type="password" placeholder="Nova senha (opcional)">
+
+      <div style="margin-top:12px;">
+        <a href="/conquistas.html" class="btn btn-secondary">Ver Conquistas</a>
+      </div>
+
+      <button id="salvar-btn">Salvar alterações</button>
+
+      <button id="logout-btn">Sair</button>
+
+    </div>
+
+  </main>
+
+  <script src="perfil.js"></script>
+</body>
+</html>

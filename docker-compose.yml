@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: formulavest-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: formulavest
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - formulavest-postgres-data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    container_name: formulavest-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+    volumes:
+      - ./:/app:delegated
+
+volumes:
+  formulavest-postgres-data:
