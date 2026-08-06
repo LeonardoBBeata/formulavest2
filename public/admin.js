@@ -157,7 +157,7 @@ function periodoDaSala(salaId) {
 }
 
 function optionsHtml(items, selected, emptyLabel) {
-  const empty = emptyLabel ? `<option value="">${emptyLabel}</option>` : '';
+  const empty = emptyLabel ? `<option value="">${escapeHtml(emptyLabel)}</option>` : '';
   return `${empty}${items.map((item) => `
     <option value="${item.id}" ${Number(item.id) === Number(selected) ? 'selected' : ''}>${escapeHtml(item.nome)}</option>
   `).join('')}`;

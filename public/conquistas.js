@@ -60,13 +60,13 @@ function mostrarDetalhe(badge, unlocked, historico){
   content.innerHTML = `
     <div style="display:flex; gap:16px; align-items:center;">
       <div style="flex:0 0 96px;">
-        <div class="badge-ico ${unlocked ? 'badge-success' : 'badge-locked'}" style="width:96px;height:96px;font-size:40px">${badge.icon}</div>
+        <div class="badge-ico ${escapeHtml(unlocked ? 'badge-success' : 'badge-locked')}" style="width:96px;height:96px;font-size:40px">${escapeHtml(badge.icon)}</div>
       </div>
       <div>
-        <h3 style="margin:0">${badge.title}</h3>
-        <p style="margin:8px 0; color:#666">${badge.desc}</p>
-        <p style="margin:6px 0;">Status: <strong>${unlocked ? 'Conquistado' : 'Bloqueado'}</strong></p>
-        ${unlockedAt ? `<p style="margin:6px 0;">Conquistado em: <strong>${new Date(unlockedAt).toLocaleString()}</strong></p>` : ''}
+        <h3 style="margin:0">${escapeHtml(badge.title)}</h3>
+        <p style="margin:8px 0; color:#666">${escapeHtml(badge.desc)}</p>
+        <p style="margin:6px 0;">Status: <strong>${escapeHtml(unlocked ? 'Conquistado' : 'Bloqueado')}</strong></p>
+        ${unlockedAt ? `<p style="margin:6px 0;">Conquistado em: <strong>${escapeHtml(new Date(unlockedAt).toLocaleString())}</strong></p>` : ''}
         <div style="margin-top:12px; display:flex; gap:8px;">
           <button id="modal-share-btn" class="btn-share">Compartilhar</button>
           <button id="modal-close-btn" class="btn-secondary-ghost">Fechar</button>
@@ -153,7 +153,7 @@ async function carregarHistorico(){
     const data = await res.json();
     const list = data.historico || [];
     if (!list.length) return el('hist-list').innerHTML = '<p class="muted">Sem histórico ainda.</p>';
-    const html = '<ul class="historic-list">' + list.map(h => `<li><strong>${h.titulo}</strong> — ${h.descricao} <small style="color:#888">(${new Date(h.criado_em).toLocaleString()})</small></li>`).join('') + '</ul>';
+    const html = '<ul class="historic-list">' + list.map(h => `<li><strong>${escapeHtml(h.titulo)}</strong> — ${escapeHtml(h.descricao)} <small style="color:#888">(${escapeHtml(new Date(h.criado_em).toLocaleString())})</small></li>`).join('') + '</ul>';
     el('hist-list').innerHTML = html;
   }catch(e){ console.error('Erro histórico', e); el('hist-list').innerText = 'Erro ao carregar histórico'; }
 }

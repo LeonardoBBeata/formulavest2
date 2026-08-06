@@ -21,10 +21,11 @@ async function carregarPerfil() {
   el("nome").value = user.username;
   el("email").value = user.email;
 
-  el("foto-preview").src = user.foto || "default.png";
+  const safeFoto = user.foto && user.foto.startsWith('/uploads/') ? `${API}${user.foto}` : "default.png";
+  el("foto-preview").src = safeFoto;
 
   el("avatar-top").style.backgroundImage =
-    `url('${user.foto || "default.png"}')`;
+    `url('${safeFoto}')`;
 }
 
 carregarPerfil();

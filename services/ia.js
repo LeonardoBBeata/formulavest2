@@ -1,11 +1,19 @@
 const axios = require('axios');
 
 async function chamarIA(prompt) {
+  if (!process.env.OPENROUTER_API_KEY) {
+    throw new Error('OPENROUTER_API_KEY não definido. Configure a chave de API no ambiente.');
+  }
+
+  if (typeof prompt !== 'string' || prompt.length > 40000) {
+    throw new Error('Prompt de IA inválido ou muito longo');
+  }
+
   try {
     console.log('Enviando para OpenRouter...');
 
     const response = await axios.post(
-      'https://openrouter.ai/api/v1/chat/completions',
+      process.env.OPENROUTER_API_URL || 'https://openrouter.ai/api/v1/chat/completions',
       {
         model: process.env.OPENROUTER_MODEL || 'openai/gpt-oss-20b:free',
         messages: [
@@ -19,7 +27,8 @@ async function chamarIA(prompt) {
             content: prompt
           }
         ],
-        temperature: 0.7,
+        temperature: 0.2,
+        top_p: 0.9,
         max_tokens: 4000
       },
       {

@@ -1,5 +1,9 @@
 require('dotenv').config();
 
+if (!process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET não definido. Defina a chave secreta JWT no ambiente.');
+}
+
 const path = require('path');
 const crypto = require('crypto');
 const compression = require('compression');
@@ -50,6 +54,16 @@ const authLimiter = rateLimit({
   }
 });
 
+const globalLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: 'Muitas requisições. Tente novamente mais tarde.'
+  }
+});
+
 // Configure Helmet with a relaxed CSP that allows the Chart.js CDN used in the frontend.
 app.use(
   helmet({
@@ -69,6 +83,7 @@ app.use(
 );
 app.use(compression());
 app.use(cookieParser());
+app.use(globalLimiter);
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -92,19 +107,23 @@ app.use(
     credentials: true
   })
 );
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use(express.json({ limit: '512kb' }));
+app.use(express.urlencoded({ extended: true, limit: '512kb' }));
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'landing.html'));
 });
 
 app.use('/uploads', express.static('public/uploads', {
   maxAge: isProd ? 1000 * 60 * 60 * 24 * 30 : 0,
-  immutable: isProd
+  immutable: isProd,
+  index: false,
+  dotfiles: 'ignore'
 }));
 app.use(express.static('public', {
   maxAge: isProd ? 1000 * 60 * 60 * 24 * 7 : 0,
-  immutable: isProd
+  immutable: isProd,
+  index: false,
+  dotfiles: 'ignore'
 }));
 app.use(
   ['/register', '/verificar-email', '/forgot-password', '/reset-password', '/login-iniciar', '/login-confirmar'],
@@ -123,6 +142,7 @@ const routeDeps = {
   extrairJSONSeguro,
   gerarToken,
   loginLimiter,
+  authLimiter,
   permitir,
   upload,
   validator
@@ -134,6 +154,20 @@ registerUserRoutes(app, routeDeps);
 registerAdminRoutes(app, routeDeps);
 registerProvasRoutes(app, routeDeps);
 
+app.use((req, res) => {
+  res.status(404).json({ error: 'Rota não encontrada' });
+});
+
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: 'Arquivo muito grande' });
+  }
+  if (err.message && err.message.includes('Apenas arquivos')) {
+    return res.status(400).json({ error: err.message });
+  }
+  res.status(500).json({ error: 'Erro interno no servidor' });
+});
 
 // export app for testing
 module.exports = app;

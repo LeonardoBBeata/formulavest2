@@ -1,3 +1,11 @@
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
+const mammoth = require('mammoth');
+const ExcelJS = require('exceljs');
+
 module.exports = function registerProvasRoutes(app, deps = {}) {
   const { PDFDocument, auth, cache, chamarIA, db, extrairJSONSeguro } = deps;
 
@@ -15,10 +23,148 @@ function removerGabarito(questoes) {
 function normalizarQuestaoProfessor(questao) {
   return {
     enunciado: String(questao.enunciado || "").trim(),
+    materia: String(questao.materia || questao.disciplina || "").trim() || null,
+    assunto: String(questao.assunto || "").trim() || null,
+    dificuldade: String(questao.dificuldade || "").trim() || null,
+    explicacao: String(questao.explicacao || "").trim() || null,
     opcoes: questao.opcoes || {},
-    correta: String(questao.correta || "").trim().toUpperCase(),
-    materia: questao.materia || null
+    correta: String(questao.correta || "").trim().toUpperCase()
   };
+}
+
+async function extrairTextoDoArquivo(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+
+  if (ext === '.pdf') {
+    const data = await fs.promises.readFile(filePath);
+    const parsed = await pdfParse(data);
+    return String(parsed.text || '').trim();
+  }
+
+  if (ext === '.docx') {
+    const result = await mammoth.extractRawText({ path: filePath });
+    return String(result.value || '').trim();
+  }
+
+  throw new Error('Formato de arquivo nao suportado');
+}
+
+function criarUploadArquivo() {
+  const uploadDir = path.join(__dirname, '..', 'uploads', 'imports');
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+
+  const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadDir),
+    filename: (req, file, cb) => {
+      const safeName = path.basename(file.originalname || '');
+      const ext = path.extname(safeName).toLowerCase();
+      const finalExt = ['.pdf', '.docx'].includes(ext) ? ext : '.pdf';
+      cb(null, `${req.user.id}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}${finalExt}`);
+    }
+  });
+
+  return multer({
+    storage,
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+      const allowedMimes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+      const safeName = path.basename(file.originalname || '');
+      const ext = path.extname(safeName).toLowerCase();
+
+      if (!allowedMimes.includes(file.mimetype) || !['.pdf', '.docx'].includes(ext)) {
+        return cb(new Error('Apenas arquivos PDF e DOCX são permitidos'), false);
+      }
+      cb(null, true);
+    }
+  });
+}
+
+async function gerarPlanilhaEstatisticas({ titulo, linhas }) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'FórmulaVest';
+  workbook.created = new Date();
+
+  const sheet = workbook.addWorksheet('Estatísticas', {
+    views: [{ state: 'frozen', ySplit: 4 }]
+  });
+
+  const headers = ['ID', 'Nome', 'Email', 'Provas feitas', 'Total acertos', 'Total questões', 'Média (%)', 'XP', 'Nível'];
+
+  sheet.mergeCells('A1:I1');
+  const titleCell = sheet.getCell('A1');
+  titleCell.value = titulo;
+  titleCell.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+  titleCell.alignment = { vertical: 'middle', horizontal: 'left' };
+  sheet.getRow(1).height = 26;
+  sheet.getRow(1).eachCell((cell) => {
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B3D91' } };
+  });
+
+  sheet.mergeCells('A2:I2');
+  const subtitleCell = sheet.getCell('A2');
+  subtitleCell.value = `Gerado em: ${new Date().toLocaleString('pt-BR')}   •   Total de alunos: ${linhas.length}`;
+  subtitleCell.font = { italic: true, size: 9, color: { argb: 'FF555555' } };
+  sheet.getRow(2).height = 18;
+
+  sheet.getRow(3).height = 6;
+
+  const headerRowIndex = 4;
+  const headerRow = sheet.getRow(headerRowIndex);
+  headers.forEach((text, index) => {
+    const cell = headerRow.getCell(index + 1);
+    cell.value = text;
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F5FCF' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+  });
+  headerRow.height = 20;
+
+  linhas.forEach((row, index) => {
+    const excelRow = sheet.addRow([
+      row.id,
+      row.username || '',
+      row.email || '',
+      Number(row.provas_feitas || 0),
+      Number(row.total_acertos || 0),
+      Number(row.total_questoes || 0),
+      Number(row.media_percentual || 0) / 100,
+      Number(row.xp || 0),
+      Number(row.nivel || 0)
+    ]);
+
+    excelRow.getCell(7).numFmt = '0.0%';
+    excelRow.eachCell((cell) => {
+      cell.alignment = { vertical: 'middle' };
+      cell.border = { bottom: { style: 'thin', color: { argb: 'FFEEEEEE' } } };
+    });
+
+    if (index % 2 === 1) {
+      excelRow.eachCell((cell) => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4F7FD' } };
+      });
+    }
+  });
+
+  sheet.columns = [
+    { width: 6 },
+    { width: 26 },
+    { width: 28 },
+    { width: 13 },
+    { width: 13 },
+    { width: 14 },
+    { width: 12 },
+    { width: 8 },
+    { width: 8 }
+  ];
+
+  sheet.autoFilter = {
+    from: { row: headerRowIndex, column: 1 },
+    to: { row: headerRowIndex, column: headers.length }
+  };
+
+  return workbook.xlsx.writeBuffer();
 }
 
 async function carregarProvaProfessorDoProfessor(provaId, user) {
@@ -128,12 +274,18 @@ RETORNE SOMENTE JSON:
 // ======================
 app.post("/gerar-prova", auth, async (req, res) => {
   try {
-    const { curso, faculdade, quantidade } = req.body;
+    const curso = String(req.body.curso || '').trim().slice(0, 200);
+    const faculdade = String(req.body.faculdade || '').trim().slice(0, 200);
+    const quantidade = Math.min(Math.max(Number(req.body.quantidade) || 10, 1), 50);
 
-    const qtd = Number(quantidade) || 10;
+    if (!curso || !faculdade) {
+      return res.status(400).json({ error: 'Curso e faculdade são obrigatórios' });
+    }
+
+    const qtd = quantidade;
 
     console.log("GERANDO PROVA...");
-    console.log(req.body);
+    console.log({ curso, faculdade, quantidade: qtd });
 
     const prompt = `
 Crie ${qtd} questões estilo ENEM para:
@@ -196,14 +348,197 @@ RETORNE SOMENTE JSON VÁLIDO:
   }
 });
 
+app.post('/professor/provas/gerar-questao-ia', auth, async (req, res) => {
+  try {
+    if (!['professor','coordenador','diretor','empresa_admin','formulavest_master'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Sem permissao' });
+    }
+
+    const prompt = String(req.body.prompt || '').trim();
+    if (!prompt) {
+      return res.status(400).json({ error: 'Prompt obrigatorio' });
+    }
+
+    if (prompt.length > 800) {
+      return res.status(400).json({ error: 'Prompt muito longo. Reduza para no máximo 800 caracteres.' });
+    }
+
+    const iaPrompt = `
+Crie UMA unica questão de múltipla escolha estilo ENEM com base neste prompt:
+"${prompt}"
+
+- Detecte automaticamente a matéria e o assunto, se possível.
+- Classifique a dificuldade como "facil", "medio" ou "dificil".
+- Inclua uma breve explicação da resposta correta no campo "explicacao".
+- Retorne apenas JSON válido.
+
+RETORNE SOMENTE JSON VALIDO:
+{
+  "questao": {
+    "enunciado": "",
+    "materia": "",
+    "assunto": "",
+    "dificuldade": "facil|medio|dificil",
+    "explicacao": "",
+    "opcoes": {
+      "A": "",
+      "B": "",
+      "C": "",
+      "D": ""
+    },
+    "correta": "A"
+  }
+}
+`;
+
+    const resposta = await chamarIA(iaPrompt);
+    const json = extrairJSONSeguro(resposta);
+
+    if (!json?.questao || !json.questao.enunciado || !json.questao.opcoes || !json.questao.correta) {
+      return res.status(500).json({ error: 'IA retornou formato inválido' });
+    }
+
+    const opcoes = json.questao.opcoes || {};
+    const correta = String(json.questao.correta || '').toUpperCase();
+    const validOptions = ['A', 'B', 'C', 'D'];
+
+    if (!validOptions.includes(correta) || !validOptions.every((letra) => typeof opcoes[letra] === 'string')) {
+      return res.status(500).json({ error: 'IA retornou opções inválidas' });
+    }
+
+    const questao = {
+      enunciado: String(json.questao.enunciado || '').trim(),
+      materia: String(json.questao.materia || '').trim(),
+      assunto: String(json.questao.assunto || '').trim(),
+      dificuldade: String(json.questao.dificuldade || '').trim(),
+      explicacao: String(json.questao.explicacao || '').trim(),
+      opcoes: {
+        A: String(opcoes.A || '').trim(),
+        B: String(opcoes.B || '').trim(),
+        C: String(opcoes.C || '').trim(),
+        D: String(opcoes.D || '').trim()
+      },
+      correta
+    };
+
+    return res.json({ questao });
+  } catch (err) {
+    console.error('ERRO GERAR QUESTAO IA:', err);
+    return res.status(500).json({ error: 'Erro ao gerar questão via IA' });
+  }
+});
+
+app.post('/professor/provas/importar', auth, criarUploadArquivo().single('arquivo'), async (req, res) => {
+  let uploadedPath;
+  try {
+    if (!['professor','coordenador','diretor','empresa_admin','formulavest_master'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Sem permissao' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Arquivo obrigatorio' });
+    }
+
+    uploadedPath = req.file.path;
+    const quantidade = Math.min(Math.max(Number(req.body.quantidade) || 10, 1), 50);
+    const texto = await extrairTextoDoArquivo(uploadedPath);
+
+    if (!texto) {
+      return res.status(500).json({ error: 'Nao foi possivel extrair texto do arquivo' });
+    }
+
+    const iaPrompt = `
+Extraia até ${quantidade} questões de múltipla escolha estilo ENEM do texto abaixo. Use apenas informações presentes no documento.
+
+- Para cada questão, deduza automaticamente a matéria e o assunto.
+- Classifique a dificuldade como "facil", "medio" ou "dificil".
+- Adicione uma breve explicação da resposta correta.
+- Retorne apenas JSON válido.
+
+RETORNE SOMENTE JSON VALIDO:
+{
+  "questoes": [
+    {
+      "enunciado": "",
+      "materia": "",
+      "assunto": "",
+      "dificuldade": "facil|medio|dificil",
+      "explicacao": "",
+      "opcoes": {
+        "A": "",
+        "B": "",
+        "C": "",
+        "D": ""
+      },
+      "correta": "A"
+    }
+  ]
+}
+
+Texto do documento:
+"""
+${texto.slice(0, 40000)}
+"""
+`;
+
+    const resposta = await chamarIA(iaPrompt);
+    const json = extrairJSONSeguro(resposta);
+
+    if (!json?.questoes || !Array.isArray(json.questoes) || json.questoes.length === 0) {
+      return res.status(500).json({ error: 'IA retornou formato inválido' });
+    }
+
+    const validOptions = ['A', 'B', 'C', 'D'];
+    const questoes = json.questoes.map((q) => {
+      const opcoes = q.opcoes || {};
+      const correta = String(q.correta || '').toUpperCase();
+      return {
+        enunciado: String(q.enunciado || '').trim(),
+        materia: String(q.materia || '').trim(),
+        assunto: String(q.assunto || '').trim(),
+        dificuldade: String(q.dificuldade || '').trim(),
+        explicacao: String(q.explicacao || '').trim(),
+        opcoes: {
+          A: String(opcoes.A || '').trim(),
+          B: String(opcoes.B || '').trim(),
+          C: String(opcoes.C || '').trim(),
+          D: String(opcoes.D || '').trim()
+        },
+        correta
+      };
+    });
+
+    const invalida = questoes.some((q) =>
+      !q.enunciado || !q.correta || !validOptions.includes(q.correta) ||
+      !q.opcoes[q.correta]
+    );
+
+    if (invalida) {
+      return res.status(500).json({ error: 'IA retornou questões inválidas' });
+    }
+
+    return res.json({ questoes });
+  } catch (err) {
+    console.error('ERRO IMPORTAR PROVA:', err);
+    return res.status(500).json({ error: err.message || 'Erro ao importar prova' });
+  } finally {
+    if (uploadedPath) {
+      fs.promises.unlink(uploadedPath).catch(() => {});
+    }
+  }
+});
+
 app.post("/gerar-simulado-materia", auth, async (req, res) => {
   try {
-    const { materia, quantidade, dificuldade } = req.body;
-    const qtd = Math.min(Number(quantidade) || 10, 30);
+    const materia = String(req.body.materia || '').trim().slice(0, 150);
+    const quantidade = Math.min(Math.max(Number(req.body.quantidade) || 10, 1), 30);
+    const dificuldade = String(req.body.dificuldade || '').trim().slice(0, 20) || 'media';
 
     if (!materia) {
       return res.status(400).json({ error: "Materia obrigatoria" });
     }
+
+    const qtd = quantidade;
 
     const prompt = `
 Crie ${qtd} questoes ineditas estilo ENEM sobre a materia: ${materia}.
@@ -355,6 +690,10 @@ app.post("/salvar-prova", auth, async (req, res) => {
   try {
     const { prova_id, questoes } = req.body;
 
+    if (!Array.isArray(questoes) || questoes.length === 0) {
+      return res.status(400).json({ error: 'Questões inválidas' });
+    }
+
     const ativo = await db.query(`
       SELECT *
       FROM provas_ativas
@@ -371,12 +710,14 @@ app.post("/salvar-prova", auth, async (req, res) => {
       return res.status(400).json({ error: "Prova já finalizada" });
     }
 
-    const gabarito = prova.questoes;
+    const gabarito = Array.isArray(prova.questoes) ? prova.questoes : [];
 
     let acertos = 0;
 
     questoes.forEach((q, i) => {
-      if (q.selecionada === gabarito[i].correta) {
+      const selecionada = String(q?.selecionada || '').toUpperCase();
+      const correta = String(gabarito[i]?.correta || '').toUpperCase();
+      if (selecionada && selecionada === correta) {
         acertos++;
       }
     });
@@ -955,7 +1296,11 @@ app.get('/professor/provas/:id/pdf', auth, async (req, res) => {
       return res.status(403).json({ error: 'Sem permissao' });
     }
 
-    const salaId = req.query.sala_id || prova.sala_id;
+    if (!Array.isArray(prova.questoes) || prova.questoes.length === 0) {
+      return res.status(400).json({ error: 'Esta prova nao possui questoes para exportar' });
+    }
+
+    const salaId = prova.sala_id;
 
     const metaRes = await db.query(`
       SELECT
@@ -974,51 +1319,106 @@ app.get('/professor/provas/:id/pdf', auth, async (req, res) => {
     const professorNome = profRes.rows[0]?.username || 'Professor';
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="prova_${prova.id}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="prova_${prova.id}.pdf"`);
 
-    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    const doc = new PDFDocument({ margin: 50, size: 'A4', bufferPages: true });
     doc.pipe(res);
 
-    doc.fontSize(24).fillColor('#0b3d91').text('FórmulaVest', { align: 'center' });
-    doc.moveDown(0.25);
-    doc.fontSize(12).fillColor('#333').text('Prova impressa para sala', { align: 'center' });
-    doc.moveDown(1);
+    const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
 
-    doc.fontSize(10).fillColor('#444');
-    doc.text(`Escola: ${meta.escola_nome || '—'}`);
-    doc.text(`Período: ${meta.periodo_nome || '—'}`);
-    doc.text(`Sala: ${meta.sala_nome || '—'}`);
-    doc.text(`Professor: ${professorNome}`);
-    doc.text(`Título da prova: ${prova.titulo}`);
-    doc.text(`Código: ${prova.codigo || '—'}`);
-    doc.text(`Data de impressão: ${new Date().toLocaleDateString('pt-BR')}`);
-    doc.moveDown(0.8);
+    // Cabeçalho
+    doc.rect(doc.page.margins.left, doc.page.margins.top, pageWidth, 70).fill('#0b3d91');
+    doc.fillColor('#ffffff').fontSize(20).font('Helvetica-Bold')
+      .text('FórmulaVest', doc.page.margins.left + 15, doc.page.margins.top + 12);
+    doc.fontSize(10).font('Helvetica')
+      .text('Prova impressa para aplicação em sala de aula', doc.page.margins.left + 15, doc.page.margins.top + 40);
 
-    doc.fontSize(10).text('Nome do aluno: ____________________________________________');
-    doc.text('Turma: __________________________      Nota: __________________________');
+    doc.y = doc.page.margins.top + 85;
+    doc.x = doc.page.margins.left;
+
+    // Bloco de metadados em caixa
+    const metaTop = doc.y;
+    doc.roundedRect(doc.page.margins.left, metaTop, pageWidth, 100, 6).stroke('#c9d6f2');
+    doc.fillColor('#0b3d91').fontSize(11).font('Helvetica-Bold')
+      .text(String(prova.titulo || 'Prova'), doc.page.margins.left + 12, metaTop + 10, { width: pageWidth - 24 });
+
+    doc.fillColor('#333').fontSize(9).font('Helvetica');
+    const colWidth = (pageWidth - 24) / 2;
+    const leftX = doc.page.margins.left + 12;
+    const rightX = leftX + colWidth;
+    let rowY = metaTop + 30;
+
+    doc.text(`Escola: ${meta.escola_nome || '—'}`, leftX, rowY, { width: colWidth - 10 });
+    doc.text(`Período: ${meta.periodo_nome || '—'}`, rightX, rowY, { width: colWidth - 10 });
+    rowY += 16;
+    doc.text(`Sala: ${meta.sala_nome || '—'}`, leftX, rowY, { width: colWidth - 10 });
+    doc.text(`Professor(a): ${professorNome}`, rightX, rowY, { width: colWidth - 10 });
+    rowY += 16;
+    doc.text(`Código da prova: ${prova.codigo || '—'}`, leftX, rowY, { width: colWidth - 10 });
+    doc.text(`Data de impressão: ${new Date().toLocaleDateString('pt-BR')}`, rightX, rowY, { width: colWidth - 10 });
+    rowY += 16;
+    doc.text(`Duração: ${prova.tempo_minutos ? prova.tempo_minutos + ' minutos' : '—'}`, leftX, rowY, { width: colWidth - 10 });
+    doc.text(`Total de questões: ${prova.questoes.length}`, rightX, rowY, { width: colWidth - 10 });
+
+    doc.y = metaTop + 110;
+    doc.x = doc.page.margins.left;
+
+    // Campos de identificação do aluno
+    doc.fontSize(9).fillColor('#000');
+    doc.text('Nome do aluno: ________________________________________________________________');
+    doc.moveDown(0.4);
+    doc.text('Turma: _____________________________      Nota: _____________________________');
     doc.moveDown(1);
 
     prova.questoes.forEach((q, index) => {
-      doc.fontSize(12).fillColor('#000').text(`Questão ${index + 1}`, { underline: true });
-      doc.moveDown(0.2);
-      doc.fontSize(10).text(q.enunciado, { align: 'justify' });
-      doc.moveDown(0.2);
+      const blocoAltura = 90 + (Object.keys(q.opcoes || {}).length * 14);
+      if (doc.y + blocoAltura > doc.page.height - doc.page.margins.bottom) {
+        doc.addPage();
+      }
+
+      const numeroTop = doc.y;
+      doc.circle(doc.page.margins.left + 8, numeroTop + 8, 10).fill('#0b3d91');
+      doc.fillColor('#fff').fontSize(9).font('Helvetica-Bold')
+        .text(String(index + 1), doc.page.margins.left + 2, numeroTop + 4, { width: 14, align: 'center' });
+
+      doc.fillColor('#000').fontSize(10.5).font('Helvetica-Bold')
+        .text('Questão', doc.page.margins.left + 24, numeroTop, { continued: false });
+
+      doc.moveDown(0.3);
+      doc.x = doc.page.margins.left;
+      doc.fontSize(10).font('Helvetica').fillColor('#111')
+        .text(q.enunciado || '', { align: 'justify' });
+      doc.moveDown(0.35);
 
       Object.entries(q.opcoes || {}).forEach(([letra, texto]) => {
-        doc.text(`${letra}) ${texto}`);
+        doc.fontSize(9.5).font('Helvetica-Bold').fillColor('#0b3d91')
+          .text(`${letra})`, doc.page.margins.left + 8, doc.y, { continued: true, width: 20 });
+        doc.font('Helvetica').fillColor('#222').text(` ${texto}`, { width: pageWidth - 30 });
       });
 
       doc.moveDown(0.3);
-      doc.text('Resposta: ________________________________________________');
-      doc.moveDown(0.7);
+      doc.fontSize(9).fillColor('#666')
+        .text('Resposta: ______________________________________________________________________');
+      doc.moveDown(0.9);
 
-      if (doc.y > 730) {
-        doc.addPage();
-      }
+      // linha separadora fina
+      doc.moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.margins.left + pageWidth, doc.y).strokeColor('#e5e5e5').stroke();
+      doc.moveDown(0.7);
     });
 
-    doc.moveDown(0.5);
-    doc.fontSize(9).fillColor('#666').text('Imprima esta prova em folha A4 para uso em sala de aula. Boa sorte!', { align: 'center' });
+    // Rodapé com numeração de página
+    const pageRange = doc.bufferedPageRange();
+    for (let i = 0; i < pageRange.count; i++) {
+      doc.switchToPage(i);
+      doc.fontSize(8).fillColor('#999')
+        .text(
+          `FórmulaVest • ${prova.titulo || ''} • Página ${i + 1} de ${pageRange.count}`,
+          doc.page.margins.left,
+          doc.page.height - doc.page.margins.bottom + 15,
+          { width: pageWidth, align: 'center' }
+        );
+    }
+
     doc.end();
   } catch (err) {
     console.error(err);
@@ -1127,30 +1527,198 @@ app.get("/professor/provas/:id/placar", auth, async (req, res) => {
   }
 });
 
+app.get('/professor/provas/:id/xls', auth, async (req, res) => {
+  try {
+    const prova = await carregarProvaProfessorDoProfessor(req.params.id, req.user);
+
+    if (prova === null) {
+      return res.status(404).json({ error: 'Prova nao encontrada' });
+    }
+
+    if (prova === false) {
+      return res.status(403).json({ error: 'Sem permissao' });
+    }
+
+    const result = await db.query(`
+      SELECT
+        u.username,
+        u.email,
+        r.acertos,
+        r.total,
+        r.percentual,
+        u.xp,
+        u.nivel,
+        r.finalizada_em
+      FROM respostas_provas_professor r
+      JOIN usuarios u ON u.id = r.aluno_id
+      WHERE r.prova_id = $1
+      ORDER BY r.percentual DESC, r.finalizada_em ASC
+    `, [prova.id]);
+
+    const rows = result.rows || [];
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'FórmulaVest';
+    workbook.created = new Date();
+
+    const sheet = workbook.addWorksheet('Resultados', {
+      views: [{ state: 'frozen', ySplit: 4 }]
+    });
+
+    // Título
+    sheet.mergeCells('A1:H1');
+    const titleCell = sheet.getCell('A1');
+    titleCell.value = `Relatório de resultados — ${prova.titulo || 'Prova'}`;
+    titleCell.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+    titleCell.alignment = { vertical: 'middle', horizontal: 'left' };
+    sheet.getRow(1).height = 26;
+    sheet.getRow(1).eachCell((cell) => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B3D91' } };
+    });
+
+    // Subtítulo com metadados
+    sheet.mergeCells('A2:H2');
+    const subtitleCell = sheet.getCell('A2');
+    subtitleCell.value = `Código: ${prova.codigo || '—'}   •   Gerado em: ${new Date().toLocaleString('pt-BR')}   •   Total de participantes: ${rows.length}`;
+    subtitleCell.font = { italic: true, size: 9, color: { argb: 'FF555555' } };
+    sheet.getRow(2).height = 18;
+
+    sheet.getRow(3).height = 6;
+
+    const headerRowIndex = 4;
+    const headers = ['#', 'Nome', 'Email', 'Acertos', 'Total', 'Percentual', 'XP', 'Nível', 'Finalizada em'];
+    const headerRow = sheet.getRow(headerRowIndex);
+    headers.forEach((text, index) => {
+      const cell = headerRow.getCell(index + 1);
+      cell.value = text;
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F5FCF' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFCCCCCC' } },
+        bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } }
+      };
+    });
+    headerRow.height = 20;
+
+    rows.forEach((row, index) => {
+      const excelRow = sheet.addRow([
+        index + 1,
+        row.username || '',
+        row.email || '',
+        Number(row.acertos || 0),
+        Number(row.total || 0),
+        Number(row.percentual || 0) / 100,
+        Number(row.xp || 0),
+        Number(row.nivel || 0),
+        row.finalizada_em ? new Date(row.finalizada_em) : null
+      ]);
+
+      excelRow.getCell(6).numFmt = '0.0%';
+      excelRow.getCell(9).numFmt = 'dd/mm/yyyy hh:mm';
+      excelRow.eachCell((cell) => {
+        cell.alignment = { vertical: 'middle' };
+        cell.border = {
+          bottom: { style: 'thin', color: { argb: 'FFEEEEEE' } }
+        };
+      });
+
+      if (index % 2 === 1) {
+        excelRow.eachCell((cell) => {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4F7FD' } };
+        });
+      }
+
+      // destaque para os 3 primeiros colocados
+      if (index === 0) {
+        excelRow.getCell(2).font = { bold: true, color: { argb: 'FFB8860B' } };
+      } else if (index === 1) {
+        excelRow.getCell(2).font = { bold: true, color: { argb: 'FF888888' } };
+      } else if (index === 2) {
+        excelRow.getCell(2).font = { bold: true, color: { argb: 'FF8B5A2B' } };
+      }
+    });
+
+    sheet.columns = [
+      { width: 5 },
+      { width: 26 },
+      { width: 28 },
+      { width: 10 },
+      { width: 10 },
+      { width: 12 },
+      { width: 8 },
+      { width: 8 },
+      { width: 20 }
+    ];
+
+    sheet.autoFilter = {
+      from: { row: headerRowIndex, column: 1 },
+      to: { row: headerRowIndex, column: headers.length }
+    };
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="prova_${prova.id}_relatorio.xlsx"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erro gerar relatorio XLS' });
+  }
+});
+
 // ======================
 // PROFESSOR: PERIODOS / SALAS
 // ======================
 app.get('/professor/periodos', auth, async (req, res) => {
   try {
-    if (!req.user.escola_id && req.user.role !== 'formulavest_master' && req.user.role !== 'empresa_admin') {
+    if (
+      !req.user.escola_id &&
+      req.user.role !== 'formulavest_master' &&
+      req.user.role !== 'empresa_admin'
+    ) {
       return res.status(403).json({ error: 'Sem permissao' });
     }
 
     const params = [];
     let where = '';
+
     if (req.user.role === 'professor') {
       params.push(req.user.id);
-      where = 'WHERE p.id IN (SELECT s.periodo_id FROM salas s WHERE s.id IN (SELECT sala_id FROM professor_salas WHERE professor_id = $1) OR s.id = COALESCE((SELECT sala_id FROM usuarios WHERE id=$1), NULL))';
+      where = `
+        WHERE p.id IN (
+          SELECT s.periodo_id
+          FROM salas s
+          WHERE s.id IN (
+            SELECT sala_id
+            FROM professor_salas
+            WHERE professor_id = $1
+          )
+          OR s.id = COALESCE(
+            (SELECT sala_id FROM usuarios WHERE id = $1),
+            NULL
+          )
+        )
+      `;
     } else if (req.user.role === 'empresa_admin') {
       params.push(req.user.empresa_id);
-      where = 'WHERE escola_id IN (SELECT id FROM escolas WHERE empresa_id=$1)';
+      where = `WHERE p.escola_id IN (
+        SELECT id FROM escolas WHERE empresa_id = $1
+      )`;
     } else if (req.user.escola_id) {
       params.push(req.user.escola_id);
-      where = 'WHERE escola_id=$1';
+      where = `WHERE p.escola_id = $1`;
     }
 
-    const result = await db.query(`SELECT * FROM periodos ${where} ORDER BY id DESC`, params);
+    const result = await db.query(`
+      SELECT *
+      FROM periodos p
+      ${where}
+      ORDER BY p.id DESC
+    `, params);
+
     res.json({ periodos: result.rows });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erro listar períodos' });
@@ -1166,7 +1734,7 @@ app.get('/professor/salas', auth, async (req, res) => {
     let result;
     if (req.user.role === 'professor') {
       result = await db.query(`
-        SELECT DISTINCT s.*, p.nome as periodo_nome
+        SELECT s.*, p.nome as periodo_nome
         FROM salas s
         JOIN periodos p ON p.id = s.periodo_id
         WHERE s.id IN (SELECT sala_id FROM professor_salas WHERE professor_id = $1)
@@ -1220,6 +1788,10 @@ app.post('/professor/salas', auth, async (req, res) => {
 
 app.post("/provas-prontas/:id/responder", auth, async (req, res) => {
   try {
+    if (req.user.role !== 'aluno') {
+      return res.status(403).json({ error: 'Sem permissao' });
+    }
+
     const { resposta, respostas, perguntaIndex } = req.body;
     const prova = await db.query(`
       SELECT *
@@ -1233,10 +1805,10 @@ app.post("/provas-prontas/:id/responder", auth, async (req, res) => {
     }
 
     const provaAtiva = prova.rows[0];
-    const respostasAtual = Array.isArray(respostas) ? respostas : [];
+    const respostasAtual = Array.isArray(respostas) ? respostas.slice(0, provaAtiva.questoes.length) : [];
     const indice = Number.isInteger(Number(perguntaIndex)) ? Number(perguntaIndex) : respostasAtual.length - 1;
 
-    if (typeof resposta === 'string' && indice >= 0) {
+    if (typeof resposta === 'string' && indice >= 0 && indice < provaAtiva.questoes.length) {
       respostasAtual[indice] = resposta.toUpperCase();
     }
 
@@ -1284,9 +1856,13 @@ app.post("/provas-prontas/:id/responder", auth, async (req, res) => {
 
 app.post("/provas-prontas/:id/finalizar", auth, async (req, res) => {
   try {
+    if (req.user.role !== 'aluno') {
+      return res.status(403).json({ error: 'Sem permissao' });
+    }
+
     const { respostas } = req.body;
 
-    if (!Array.isArray(respostas)) {
+    if (!Array.isArray(respostas) || respostas.length === 0) {
       return res.status(400).json({ error: "Respostas invalidas" });
     }
 
@@ -1412,7 +1988,7 @@ app.post('/professor/provas/encerrar-todas', auth, async (req, res) => {
   }
 });
 
-// exportar estatísticas por período (CSV)
+// exportar estatísticas por período (XLSX)
 app.get('/professor/export/periodo/:periodoId', auth, async (req, res) => {
   try {
     const periodoId = req.params.periodoId;
@@ -1442,19 +2018,24 @@ app.get('/professor/export/periodo/:periodoId', auth, async (req, res) => {
       ORDER BY provas_feitas DESC
     `, params);
 
-    const header = ['id','username','email','provas_feitas','total_acertos','total_questoes','media_percentual','xp','nivel'];
-    const csv = [header.join(',')].concat(rows.rows.map(r => [r.id, JSON.stringify(r.username||''), JSON.stringify(r.email||''), r.provas_feitas, r.total_acertos, r.total_questoes, (Number(r.media_percentual)||0).toFixed(1), r.xp||0, r.nivel||0].join(','))).join('\n');
+    const periodoInfo = await db.query('SELECT nome FROM periodos WHERE id = $1', [periodoId]);
+    const periodoNome = periodoInfo.rows[0]?.nome || `Periodo ${periodoId}`;
 
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="periodo_${periodoId}_export.csv"`);
-    return res.send(csv);
+    const buffer = await gerarPlanilhaEstatisticas({
+      titulo: `Estatísticas do período — ${periodoNome}`,
+      linhas: rows.rows
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="periodo_${periodoId}_export.xlsx"`);
+    return res.send(buffer);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erro exportar periodo' });
   }
 });
 
-// exportar por sala (CSV)
+// exportar por sala (XLSX)
 app.get('/professor/export/sala/:salaId', auth, async (req, res) => {
   try {
     const salaId = req.params.salaId;
@@ -1480,12 +2061,17 @@ app.get('/professor/export/sala/:salaId', auth, async (req, res) => {
       ORDER BY provas_feitas DESC
     `, params);
 
-    const header = ['id','username','email','provas_feitas','total_acertos','total_questoes','media_percentual','xp','nivel'];
-    const csv = [header.join(',')].concat(rows.rows.map(r => [r.id, JSON.stringify(r.username||''), JSON.stringify(r.email||''), r.provas_feitas, r.total_acertos, r.total_questoes, (Number(r.media_percentual)||0).toFixed(1), r.xp||0, r.nivel||0].join(','))).join('\n');
+    const salaInfo = await db.query('SELECT nome FROM salas WHERE id = $1', [salaId]);
+    const salaNome = salaInfo.rows[0]?.nome || `Sala ${salaId}`;
 
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="sala_${salaId}_export.csv"`);
-    return res.send(csv);
+    const buffer = await gerarPlanilhaEstatisticas({
+      titulo: `Estatísticas da sala — ${salaNome}`,
+      linhas: rows.rows
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="sala_${salaId}_export.xlsx"`);
+    return res.send(buffer);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erro exportar sala' });

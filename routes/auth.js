@@ -233,10 +233,11 @@ app.post(
       `, [emailNormalizado]);
 
       const user = result.rows[0];
+      const senhaOk = user ? await bcrypt.compare(senha, user.senha) : false;
 
-      if (!user) {
-        return res.status(404).json({
-          error: "Email não encontrado"
+      if (!user || !senhaOk) {
+        return res.status(401).json({
+          error: "Credenciais inválidas"
         });
       }
 
@@ -249,18 +250,6 @@ app.post(
       if (user.banido) {
         return res.status(403).json({
           error: "Usuário banido"
-        });
-      }
-
-      const senhaOk =
-        await bcrypt.compare(
-          senha,
-          user.senha
-        );
-
-      if (!senhaOk) {
-        return res.status(401).json({
-          error: "Senha incorreta"
         });
       }
 
@@ -333,28 +322,17 @@ app.post(
       `, [emailNormalizado]);
 
       const user = result.rows[0];
+      const senhaOk = user ? await bcrypt.compare(senha, user.senha) : false;
 
-      if (!user) {
-        return res.status(404).json({
-          error: "Usuário não encontrado"
+      if (!user || !senhaOk) {
+        return res.status(401).json({
+          error: "Credenciais inválidas"
         });
       }
 
       if (user.banido) {
         return res.status(403).json({
           error: "Usuário banido"
-        });
-      }
-
-      const senhaOk =
-        await bcrypt.compare(
-          senha,
-          user.senha
-        );
-
-      if (!senhaOk) {
-        return res.status(401).json({
-          error: "Senha incorreta"
         });
       }
 
@@ -408,7 +386,7 @@ app.post(
   "/forgot-password",
   async (req, res) => {
     try {
-      const { email } = req.body;
+      const email = String(req.body.email || '').toLowerCase().trim();
 
       const result =
         await db.query(`
@@ -438,8 +416,8 @@ app.post(
         WHERE email=$2
       `, [token, email]);
 
-      const link =
-        `https://formulavest.onrender.com/reset-password.html?token=${token}`;
+      const resetHost = process.env.APP_URL || 'https://formulavest.onrender.com';
+      const link = `${resetHost.replace(/\/$/, '')}/reset-password.html?token=${token}`;
 
       await enviarEmail(
         email,

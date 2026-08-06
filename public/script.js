@@ -137,7 +137,7 @@ async function carregarConquistas() {
       </div>
       <div class="card">
         <h4>Histórico</h4>
-        ${hist.length ? ('<ul>' + hist.map(h => `<li><strong>${h.titulo}</strong> — ${h.descricao} <small>(${new Date(h.criado_em).toLocaleString()})</small></li>`).join('') + '</ul>') : '<p>Sem histórico ainda.</p>'}
+        ${hist.length ? ('<ul>' + hist.map(h => `<li><strong>${escapeHtml(h.titulo)}</strong> — ${escapeHtml(h.descricao)} <small>(${escapeHtml(new Date(h.criado_em).toLocaleString())})</small></li>`).join('') + '</ul>') : '<p>Sem histórico ainda.</p>'}
       </div>
     `;
     // detect new unlocks and notify
@@ -292,8 +292,8 @@ async function carregarRanking() {
       el("top3").innerHTML = top3.length
         ? top3.map((u, i) => `
           <div class="card">
-            <h3>${i + 1}º ${u.username || u.nome || 'Usuário'}</h3>
-            <p>${u.xp || 0} XP</p>
+            <h3>${i + 1}º ${escapeHtml(u.username || u.nome || 'Usuário')}</h3>
+            <p>${Number(u.xp || 0)} XP</p>
           </div>
         `).join("")
         : '<div class="card"><p>Ainda não há dados de ranking.</p></div>';
@@ -302,7 +302,7 @@ async function carregarRanking() {
     if (el("ranking-list")) {
       el("ranking-list").innerHTML = data.length
         ? data.map((u, i) => `
-          <div>${i + 1} - ${u.username || u.nome || 'Usuário'} | ${u.xp || 0} XP</div>
+          <div>${i + 1} - ${escapeHtml(u.username || u.nome || 'Usuário')} | ${Number(u.xp || 0)} XP</div>
         `).join("")
         : '<div>Nenhum usuário encontrado no ranking.</div>';
     }
@@ -400,11 +400,11 @@ function renderProva(lista, containerId, btnFinalizar) {
   lista.forEach((q, i) => {
     container.innerHTML += `
       <div class="questao">
-        <p><b>Q${i + 1}</b> ${q.enunciado}</p>
+        <p><b>Q${i + 1}</b> ${escapeHtml(q.enunciado)}</p>
 
         ${Object.entries(q.opcoes).map(([l, t]) => `
-          <div onclick="selecionar(${i}, '${l}', this)">
-            ${l}) ${t}
+          <div onclick="selecionar(${i}, ${JSON.stringify(l)}, this)">
+            ${escapeHtml(l)}) ${escapeHtml(t)}
           </div>
         `).join("")}
       </div>
@@ -531,7 +531,7 @@ function renderPlanoDia() {
   const container = el("plano-dia-list");
   if (!container) return;
 
-  container.innerHTML = planoDia.map(item => `<li>✓ ${item}</li>`).join("");
+  container.innerHTML = planoDia.map(item => `<li>✓ ${escapeHtml(item)}</li>`).join("");
 }
 
 function renderMetas() {

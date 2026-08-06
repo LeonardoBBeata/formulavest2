@@ -1,5 +1,5 @@
 module.exports = function registerUserRoutes(app, deps = {}) {
-  const { auth, bcrypt, db, upload } = deps;
+  const { auth, bcrypt, db, upload, validator } = deps;
 
 app.post("/add-xp", auth, async (req, res) => {
   try {
@@ -198,7 +198,7 @@ app.post("/upload-foto", auth, upload.single("foto"), async (req, res) => {
 
 app.put("/atualizar-perfil", auth, async (req, res) => {
   try {
-    const { nome, email, senha, foto } = req.body;
+    const { nome, email, senha } = req.body;
 
     const userResult = await db.query(`
       SELECT * FROM usuarios WHERE id = $1
@@ -210,14 +210,30 @@ app.put("/atualizar-perfil", auth, async (req, res) => {
       return res.status(404).json({ error: "Usuário não encontrado" });
     }
 
-    let novoNome = nome || user.username;
-    let novoEmail = email || user.email;
-    let novaFoto = foto || user.foto;
+    let novoNome = nome ? String(nome).trim() : user.username;
+    let novoEmail = email ? String(email).toLowerCase().trim() : user.email;
+    let novaFoto = user.foto;
+
+    if (!novoNome || novoNome.length < 3) {
+      return res.status(400).json({ error: 'Nome inválido' });
+    }
+
+    if (!validator.isEmail(novoEmail || '')) {
+      return res.status(400).json({ error: 'Email inválido' });
+    }
+
+    const existing = await db.query(`SELECT id FROM usuarios WHERE email = $1 AND id <> $2`, [novoEmail, req.user.id]);
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ error: 'Email já em uso' });
+    }
 
     let novaSenha = user.senha;
 
-    if (senha && senha.length >= 8) {
-      novaSenha = await bcrypt.hash(senha, 10);
+    if (senha) {
+      if (senha.length < 8) {
+        return res.status(400).json({ error: 'Senha deve ter no mínimo 8 caracteres' });
+      }
+      novaSenha = await bcrypt.hash(String(senha), 10);
     }
 
     await db.query(`

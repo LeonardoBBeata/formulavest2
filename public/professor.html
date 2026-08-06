@@ -132,6 +132,20 @@
             </label>
           </div>
 
+          <div class="form-grid">
+            <label>
+              <span>Arquivo de prova</span>
+              <input id="prova-arquivo" type="file" accept=".pdf,.docx" />
+            </label>
+            <label>
+              <span>Questões geradas</span>
+              <input id="prova-arquivo-quantidade" type="number" min="1" max="50" value="10" />
+            </label>
+          </div>
+          <div class="actions-row" style="margin-top:8px;">
+            <button id="importar-arquivo-btn" class="btn btn-secondary" type="button">Importar arquivo</button>
+          </div>
+
           <div id="questoes-container" class="questoes-container"></div>
 
           <div class="actions-row">
@@ -173,6 +187,7 @@
             <div class="live-actions">
               <button id="start-round-btn" class="btn btn-primary" type="button">Iniciar rodada</button>
               <button id="next-round-btn" class="btn btn-secondary" type="button">Próxima pergunta</button>
+              <button id="download-xls-btn" class="btn btn-secondary small" type="button">Gerar relatório XLS</button>
             </div>
           </div>
 

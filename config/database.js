@@ -15,6 +15,8 @@ const connectionString = process.env.DATABASE_URL || (() => {
   return `postgresql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
 })();
 
+const poolMax = Number(process.env.DB_POOL_MAX) || 20;
+
 const db = new Pool({
   connectionString,
   ssl: useSSL
@@ -22,7 +24,7 @@ const db = new Pool({
         rejectUnauthorized: false
       }
     : false,
-  max: 10,
+  max: poolMax,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000
 });

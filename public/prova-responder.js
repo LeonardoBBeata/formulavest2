@@ -1,9 +1,24 @@
 const API = window.location.origin;
 const token = localStorage.getItem('token');
-const provaSalva = JSON.parse(sessionStorage.getItem('provaAtual') || 'null');
+let provaSalva = null;
+
+try {
+  provaSalva = JSON.parse(sessionStorage.getItem('provaAtual') || 'null');
+} catch (err) {
+  provaSalva = null;
+}
 
 if (!token || !provaSalva) {
   window.location.href = '/prova-codigo.html';
+}
+
+function escapeHtml(value = '') {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 let respostas = [];
@@ -28,11 +43,11 @@ function renderPerguntaAtual() {
   container.innerHTML = `
     <div class="questao-card">
       <div class="questao-top">
-        <strong>${currentQuestionIndex + 1}. ${questao.enunciado}</strong>
+        <strong>${currentQuestionIndex + 1}. ${escapeHtml(questao.enunciado)}</strong>
       </div>
       <div class="opcoes-grid">
         ${Object.entries(questao.opcoes || {}).map(([letra, texto]) => `
-          <button class="btn btn-secondary" type="button" data-resposta="${letra}">${letra}) ${texto}</button>
+          <button class="btn btn-secondary" type="button" data-resposta="${escapeHtml(letra)}">${escapeHtml(letra)}) ${escapeHtml(texto)}</button>
         `).join('')}
       </div>
     </div>
