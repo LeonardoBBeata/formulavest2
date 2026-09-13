@@ -1,29 +1,10 @@
 module.exports = function registerUserRoutes(app, deps = {}) {
   const { auth, bcrypt, db, upload, validator } = deps;
 
-app.post("/add-xp", auth, async (req, res) => {
-  try {
-    const xp = Number(req.body.xp || 0);
-
-    if (xp <= 0) {
-      return res.status(400).json({ error: "XP inválido" });
-    }
-
-    const result = await db.query(`
-      UPDATE usuarios
-      SET 
-        xp = xp + $1,
-        nivel = FLOOR((xp + $1) / 100) + 1
-      WHERE id = $2
-      RETURNING xp, nivel
-    `, [xp, req.user.id]);
-
-    res.json(result.rows[0]);
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Erro XP" });
-  }
+// XP is awarded only by server-side completion flows. Accepting a client supplied
+// amount allowed any authenticated user to manipulate the ranking.
+app.post("/add-xp", auth, (_, res) => {
+  res.status(403).json({ error: "XP é atribuído automaticamente ao finalizar provas" });
 });
 
 //=======================
@@ -302,6 +283,7 @@ app.put("/trocar-senha", auth, async (req, res) => {
       SET senha = $1
       WHERE id = $2
     `, [hash, req.user.id]);
+    await db.query('DELETE FROM refresh_tokens WHERE user_id = $1', [req.user.id]);
 
     res.json({ ok: true });
   } catch (err) {

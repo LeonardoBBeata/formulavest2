@@ -19,18 +19,28 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
       .replace(/(^-|-$)/g, '');
   }
 
+  async function assertEscolaPermitida(req, escolaId) {
+    const escola = await db.query('SELECT id, empresa_id FROM escolas WHERE id = $1', [escolaId]);
+    const item = escola.rows[0];
+    if (!item) throw new Error('Escola inválida');
+    if (req.user.role !== 'formulavest_master' && item.empresa_id !== req.user.empresa_id) {
+      throw new Error('Sem permissao para esta escola');
+    }
+    if (['diretor', 'coordenador'].includes(req.user.role) && Number(item.id) !== Number(req.user.escola_id)) {
+      throw new Error('Sem permissao para esta escola');
+    }
+    return item;
+  }
+
   async function buscarPeriodoParaUsuario(req, periodoId, periodoNome, escolaId) {
+    const escola = await assertEscolaPermitida(req, escolaId);
     if (periodoId) {
-      const r = await db.query('SELECT * FROM periodos WHERE id=$1', [periodoId]);
+      const r = await db.query('SELECT * FROM periodos WHERE id=$1 AND escola_id=$2', [periodoId, escola.id]);
       if (r.rows.length === 0) throw new Error('Período inválido');
       return r.rows[0];
     }
 
     if (!periodoNome) throw new Error('Período não informado');
-
-    // find or create
-    const escola = await db.query('SELECT * FROM escolas WHERE id=$1', [escolaId]);
-    if (escola.rows.length === 0) throw new Error('Escola inválida');
 
     const found = await db.query('SELECT * FROM periodos WHERE escola_id=$1 AND LOWER(nome)=LOWER($2)', [escolaId, periodoNome]);
     if (found.rows.length) return found.rows[0];
@@ -41,7 +51,7 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
 
   async function buscarSalaParaPeriodo(periodoId, salaId, salaNome) {
     if (salaId) {
-      const r = await db.query('SELECT * FROM salas WHERE id=$1', [salaId]);
+      const r = await db.query('SELECT * FROM salas WHERE id=$1 AND periodo_id=$2', [salaId, periodoId]);
       if (r.rows.length === 0) throw new Error('Sala inválida');
       return r.rows[0];
     }
@@ -531,6 +541,19 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
       if (req.user.role === 'coordenador') {
         if (!['aluno', 'professor'].includes(role)) return res.status(403).json({ error: 'Sem permissão' });
         escolaId = req.user.escola_id;
+      }
+
+      if (escolaId) {
+        await assertEscolaPermitida(req, escolaId);
+      }
+      if (sala_id) {
+        const sala = await carregarSalaComContexto(sala_id);
+        if (!sala || (escolaId && Number(sala.escola_id) !== Number(escolaId))) {
+          return res.status(400).json({ error: 'Sala inválida para a escola informada' });
+        }
+        if (req.user.role !== 'formulavest_master' && sala.empresa_id !== req.user.empresa_id) {
+          return res.status(403).json({ error: 'Sem permissao para esta sala' });
+        }
       }
 
       await db.query(`INSERT INTO usuarios(username,email,senha,role,empresa_id,escola_id,sala_id,verificado) VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE)`, [username, emailNorm, hash, role, empresaId, escolaId, sala_id]);

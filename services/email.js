@@ -1,38 +1,37 @@
-const SibApiV3Sdk = require('@getbrevo/brevo');
+const nodemailer = require('nodemailer');
 
-const brevo = new SibApiV3Sdk.TransactionalEmailsApi();
-
-brevo.setApiKey(
-  SibApiV3Sdk.TransactionalEmailsApiApiKeys.apiKey,
-  process.env.BREVO_API_KEY
-);
+function criarTransportadorOutlook() {
+  return nodemailer.createTransport({
+    host: 'smtp-mail.outlook.com',
+    port: 587,
+    secure: false,
+    requireTLS: true,
+    auth: {
+      user: process.env.OUTLOOK_EMAIL,
+      pass: process.env.OUTLOOK_APP_PASSWORD
+    }
+  });
+}
 
 async function enviarEmail(para, assunto, texto, html = null) {
-  if (!process.env.BREVO_API_KEY || !process.env.EMAIL_FROM) {
-    console.warn('BREVO_API_KEY ou EMAIL_FROM ausente; email nao enviado.');
+  if (!process.env.OUTLOOK_EMAIL || !process.env.OUTLOOK_APP_PASSWORD) {
+    console.warn('OUTLOOK_EMAIL ou OUTLOOK_APP_PASSWORD ausente; email nao enviado.');
     return { ok: false, reason: 'config' };
   }
 
   try {
-    await brevo.sendTransacEmail({
-      sender: {
-        name: 'FormulaVest',
-        email: process.env.EMAIL_FROM
-      },
-      to: [
-        {
-          email: para
-        }
-      ],
+    const info = await criarTransportadorOutlook().sendMail({
+      from: `FormulaVest <${process.env.OUTLOOK_EMAIL}>`,
+      to: [para],
       subject: assunto,
-      textContent: texto,
-      htmlContent: html || `<p>${texto}</p>`
+      text: texto,
+      html: html || `<p>${texto}</p>`
     });
 
-    return { ok: true };
+    return { ok: true, id: info.messageId };
   } catch (error) {
-    console.warn('Erro ao enviar email:', error?.response?.data || error.message);
-    return { ok: false, reason: 'provider', error };
+    console.warn('Erro ao enviar email pelo Outlook:', error?.message || error);
+    return { ok: false, reason: 'provider' };
   }
 }
 

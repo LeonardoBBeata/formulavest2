@@ -1,4 +1,4 @@
-const CACHE_NAME = 'formulavest-v1';
+const CACHE_NAME = 'formulavest-v3';
 const SHELL_ASSETS = [
   '/',
   '/landing.html',
@@ -18,7 +18,7 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key)))))
+    caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))))
   );
   self.clients.claim();
 });

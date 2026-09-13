@@ -12,7 +12,7 @@ const rateLimit = require('express-rate-limit');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const cookieParser = require('cookie-parser');
-const helmet = require('helmet');
+//const helmet = require('helmet');
 const PDFDocument = require('pdfkit');
 const validator = require('validator');
 
@@ -31,7 +31,7 @@ const registerAdminRoutes = require('./routes/admin');
 const registerProvasRoutes = require('./routes/provas');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 const isProd = process.env.NODE_ENV === 'production';
 
 app.set('trust proxy', 1);
@@ -65,22 +65,10 @@ const globalLimiter = rateLimit({
 });
 
 // Configure Helmet with a relaxed CSP that allows the Chart.js CDN used in the frontend.
-app.use(
-  helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", 'https://cdn.jsdelivr.net'],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:'],
-        connectSrc: ["'self'", process.env.APP_URL || 'http://localhost:3000'],
-        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
-        objectSrc: ["'none'"],
-        upgradeInsecureRequests: []
-      }
-    }
-  })
-);
+//app.use(helmet({
+//  contentSecurityPolicy: false
+//}));
+
 app.use(compression());
 app.use(cookieParser());
 app.use(globalLimiter);

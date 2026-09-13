@@ -1,5 +1,14 @@
 const axios = require('axios');
 
+function obterModelo() {
+  const configured = String(process.env.OPENROUTER_MODEL || '').trim();
+  if (!configured || configured === 'openai/gpt-oss-20b:free') {
+    if (configured) console.warn('OPENROUTER_MODEL=openai/gpt-oss-20b:free foi descontinuado; usando openai/gpt-oss-20b.');
+    return 'openai/gpt-oss-20b';
+  }
+  return configured;
+}
+
 async function chamarIA(prompt) {
   if (!process.env.OPENROUTER_API_KEY) {
     throw new Error('OPENROUTER_API_KEY não definido. Configure a chave de API no ambiente.');
@@ -12,10 +21,11 @@ async function chamarIA(prompt) {
   try {
     console.log('Enviando para OpenRouter...');
 
+    const model = obterModelo();
     const response = await axios.post(
       process.env.OPENROUTER_API_URL || 'https://openrouter.ai/api/v1/chat/completions',
       {
-        model: process.env.OPENROUTER_MODEL || 'openai/gpt-oss-20b:free',
+        model,
         messages: [
           {
             role: 'system',
@@ -51,7 +61,11 @@ async function chamarIA(prompt) {
     console.log('Resposta recebida da IA.');
     return texto;
   } catch (err) {
+    const providerMessage = err.response?.data?.error?.message;
     console.error('ERRO IA:', err.response?.data || err.message);
+    if (err.response?.status === 404 && /unavailable for free/i.test(providerMessage || '')) {
+      throw new Error('O modelo selecionado requer créditos no OpenRouter. Configure OPENROUTER_MODEL com um modelo disponível ou adicione créditos.');
+    }
     throw new Error('Erro IA');
   }
 }
@@ -71,5 +85,6 @@ function extrairJSONSeguro(texto) {
 
 module.exports = {
   chamarIA,
-  extrairJSONSeguro
+  extrairJSONSeguro,
+  obterModelo
 };

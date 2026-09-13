@@ -10,18 +10,23 @@
 <body>
   <div class="page-shell" style="grid-template-columns: 1fr;">
     <main class="main-content">
-      <section class="card" style="max-width: 760px; margin: 0 auto;">
+      <section class="card responder-card" style="max-width: 760px; margin: 0 auto;">
         <div class="section-title">
           <div>
-            <p class="eyebrow">Responder prova</p>
+            <p class="eyebrow">Respondendo prova</p>
             <h3 id="titulo-prova">Carregando...</h3>
           </div>
-          <div id="tempo-restante" class="status-pill">--</div>
+          <div id="tempo-restante" class="status-pill tempo-pill">--</div>
         </div>
+
+        <div class="progresso-wrap">
+          <div class="progresso-barra">
+            <div id="progresso-fill" class="progresso-fill"></div>
+          </div>
+          <span id="progresso-texto" class="small progresso-texto">Questão 1</span>
+        </div>
+
         <div id="questoes-container" class="questoes-container"></div>
-        <div class="actions-row" style="justify-content: flex-start; margin-top: 14px;">
-          <button id="finalizar-btn" class="btn btn-primary" type="button">Finalizar prova</button>
-        </div>
       </section>
     </main>
   </div>

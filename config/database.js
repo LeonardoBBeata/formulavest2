@@ -90,6 +90,11 @@ async function initDB() {
   `);
 
   await db.query(`
+    ALTER TABLE usuarios
+    ADD COLUMN IF NOT EXISTS codigo_verificacao_expira TIMESTAMP
+  `);
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS provas(
       id SERIAL PRIMARY KEY,
       usuario_id INTEGER REFERENCES usuarios(id),
@@ -240,6 +245,21 @@ async function initDB() {
   `);
 
   await db.query(`
+    ALTER TABLE provas_professor
+    ADD COLUMN IF NOT EXISTS max_alunos INTEGER DEFAULT 1
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS provas_professor_participantes(
+      id SERIAL PRIMARY KEY,
+      prova_id INTEGER REFERENCES provas_professor(id) ON DELETE CASCADE,
+      aluno_id INTEGER REFERENCES usuarios(id) ON DELETE CASCADE,
+      entrou_em TIMESTAMP DEFAULT NOW(),
+      UNIQUE(prova_id, aluno_id)
+    )
+  `);
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS respostas_provas_professor(
       id SERIAL PRIMARY KEY,
       prova_id INTEGER REFERENCES provas_professor(id) ON DELETE CASCADE,
@@ -251,6 +271,11 @@ async function initDB() {
       finalizada_em TIMESTAMP DEFAULT NOW(),
       UNIQUE(prova_id, aluno_id)
     )
+  `);
+
+  await db.query(`
+    ALTER TABLE respostas_provas_professor
+    ADD COLUMN IF NOT EXISTS finalizada BOOLEAN DEFAULT FALSE
   `);
 
   console.log('Banco OK');

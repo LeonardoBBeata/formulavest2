@@ -6,7 +6,7 @@
   <title>FórmulaVest</title>
 
   <link rel="stylesheet" href="style.css">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="script.js" defer></script>
 
   <style>
@@ -46,9 +46,9 @@
 </div>
 
 <!-- PERFIL BUTTON -->
-<div class="profile-circle" onclick="window.location.href='perfil.html'">
+<a class="profile-circle" href="/perfil.html" aria-label="Abrir perfil">
   👤
-</div>
+</a>
 
 <!-- TIMER -->
 <div id="timer-bar" style="display:none;">
@@ -304,7 +304,7 @@
     <h1>Resultado</h1>
     <p id="final-text"></p>
 
-    <button onclick="document.getElementById('final-screen').classList.add('hidden')">
+    <button id="close-final-screen-btn" type="button">
       Fechar
     </button>
   </div>

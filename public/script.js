@@ -52,6 +52,15 @@ setInterval(() => {
 // ======================
 const el = (id) => document.getElementById(id);
 
+function escapeHtml(valor) {
+  return String(valor ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ======================
 // ABAS
 // ======================
@@ -79,6 +88,9 @@ function configurarBotoes() {
 
   el("finalizar-enem-btn")?.addEventListener("click", salvarResultado);
   el("finalizar-provao-btn")?.addEventListener("click", salvarResultado);
+  el("close-final-screen-btn")?.addEventListener("click", () => {
+    el("final-screen")?.classList.add("hidden");
+  });
 
   el("enviar-redacao")?.addEventListener("click", corrigirRedacao);
   el("iniciar-foco-btn")?.addEventListener("click", iniciarModoFoco);
@@ -361,33 +373,68 @@ async function carregarGrafico() {
 // PROVAS
 // ======================
 async function gerarEnem() {
-  const res = await fetch(`${API}/gerar-enem`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` }
+  await gerarProvaAluno({
+    endpoint: "/gerar-enem",
+    containerId: "enem-container",
+    finalizarId: "finalizar-enem-btn",
+    botaoId: "gerar-enem-btn"
   });
-
-  const data = await res.json();
-
-  questoes = data.questoes;
-  provaId = data.prova_id;
-  respostasUser = {};
-
-  renderProva(data.questoes, "enem-container", "finalizar-enem-btn");
 }
 
 async function gerarProvao() {
-  const res = await fetch(`${API}/gerar-provao`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` }
+  await gerarProvaAluno({
+    endpoint: "/gerar-provao",
+    containerId: "provao-container",
+    finalizarId: "finalizar-provao-btn",
+    botaoId: "gerar-provao-btn"
   });
+}
 
-  const data = await res.json();
+async function gerarProvaAluno({ endpoint, containerId, finalizarId, botaoId }) {
+  const container = el(containerId);
+  const botao = el(botaoId);
+  const textoOriginal = botao?.textContent || "";
 
-  questoes = data.questoes;
-  provaId = data.prova_id;
-  respostasUser = {};
+  if (botao) {
+    botao.disabled = true;
+    botao.textContent = "Gerando...";
+  }
 
-  renderProva(data.questoes, "provao-container", "finalizar-provao-btn");
+  if (container) {
+    container.innerHTML = '<div class="card">Gerando prova, aguarde...</div>';
+  }
+
+  el(finalizarId)?.classList.add("hidden");
+
+  try {
+    const res = await fetch(`${API}${endpoint}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Nao foi possivel gerar a prova");
+    if (!data.prova_id || !Array.isArray(data.questoes) || data.questoes.length === 0) {
+      throw new Error("A prova foi gerada sem questoes validas");
+    }
+
+    questoes = data.questoes;
+    provaId = data.prova_id;
+    respostasUser = {};
+
+    renderProva(data.questoes, containerId, finalizarId);
+  } catch (error) {
+    console.error(error);
+    if (container) {
+      container.innerHTML = `<div class="card">${escapeHtml(error.message || "Erro ao gerar prova")}</div>`;
+    }
+    mostrarToast(error.message || "Erro ao gerar prova");
+  } finally {
+    if (botao) {
+      botao.disabled = false;
+      botao.textContent = textoOriginal;
+    }
+  }
 }
 
 // ======================
@@ -395,20 +442,45 @@ async function gerarProvao() {
 // ======================
 function renderProva(lista, containerId, btnFinalizar) {
   const container = el(containerId);
+  if (!container) return;
   container.innerHTML = "";
 
+  if (!Array.isArray(lista) || lista.length === 0) {
+    container.innerHTML = '<div class="card">Nenhuma questao encontrada para esta prova.</div>';
+    return;
+  }
+
   lista.forEach((q, i) => {
+    const opcoes = q && typeof q.opcoes === "object" && !Array.isArray(q.opcoes)
+      ? Object.entries(q.opcoes).filter(([letra, texto]) => letra && texto != null)
+      : [];
+
+    if (!q?.enunciado || opcoes.length < 2) return;
+
     container.innerHTML += `
       <div class="questao">
         <p><b>Q${i + 1}</b> ${escapeHtml(q.enunciado)}</p>
 
-        ${Object.entries(q.opcoes).map(([l, t]) => `
-          <div onclick="selecionar(${i}, ${JSON.stringify(l)}, this)">
+        <div class="alternativas">
+        ${opcoes.map(([l, t]) => `
+          <button class="alternativa" type="button" data-questao="${i}" data-letra="${escapeHtml(l)}">
             ${escapeHtml(l)}) ${escapeHtml(t)}
-          </div>
+          </button>
         `).join("")}
+        </div>
       </div>
     `;
+  });
+
+  if (!container.children.length) {
+    container.innerHTML = '<div class="card">A IA retornou questões incompletas. Gere a prova novamente.</div>';
+    return;
+  }
+
+  container.querySelectorAll(".alternativa").forEach(botao => {
+    botao.addEventListener("click", () => {
+      selecionar(Number(botao.dataset.questao), botao.dataset.letra, botao);
+    });
   });
 
   el(btnFinalizar)?.classList.remove("hidden");
@@ -422,12 +494,14 @@ function selecionar(index, letra, elClicked) {
 
   respostasUser[index] = letra;
 
-  const all = elClicked.parentElement.querySelectorAll("div");
+  const all = elClicked.parentElement.querySelectorAll(".alternativa");
 
   all.forEach(a => {
-    a.onclick = null;
+    a.disabled = true;
     a.style.opacity = a === elClicked ? "1" : "0.4";
   });
+
+  elClicked.classList.add("selecionada");
 }
 
 // ======================

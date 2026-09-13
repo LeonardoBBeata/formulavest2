@@ -1,27 +1,28 @@
 module.exports = function registerAuthRoutes(app, deps = {}) {
   const { bcrypt, crypto, db, enviarEmail, gerarToken, loginLimiter, validator } = deps;
 
+  // Persist only a hash, so a database disclosure does not reveal live sessions.
+  const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
+
   // Helper: create a refresh token record
   async function createRefreshToken(userId) {
-    const token = crypto.randomUUID();
+    const token = crypto.randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + (30 * 24 * 60 * 60 * 1000)); // 30 days
-    await db.query(`INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1,$2,$3)`, [userId, token, expiresAt]);
+    await db.query(`INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES ($1,$2,$3)`, [userId, hashToken(token), expiresAt]);
     return { token, expiresAt };
   }
 
   async function rotateRefreshToken(oldToken) {
     // find existing
-    const r = await db.query(`SELECT * FROM refresh_tokens WHERE token=$1`, [oldToken]);
+    const r = await db.query(`DELETE FROM refresh_tokens WHERE token=$1 RETURNING user_id`, [hashToken(oldToken)]);
     if (r.rows.length === 0) return null;
     const row = r.rows[0];
-    // delete old and create new
-    await db.query(`DELETE FROM refresh_tokens WHERE id=$1`, [row.id]);
     return createRefreshToken(row.user_id);
   }
 
   async function revokeRefreshToken(token) {
     if (!token) return;
-    await db.query(`DELETE FROM refresh_tokens WHERE token=$1`, [token]);
+    await db.query(`DELETE FROM refresh_tokens WHERE token=$1`, [hashToken(token)]);
   }
 
 app.post('/register', async (req, res) => {
@@ -71,9 +72,7 @@ app.post('/register', async (req, res) => {
         const hash = await bcrypt.hash(senha, 10);
 
         // gerar código de verificação
-        const codigo = Math.floor(
-            100000 + Math.random() * 900000
-        ).toString();
+        const codigo = crypto.randomInt(100000, 1000000).toString();
 
         // salvar usuário no banco
         await db.query(
@@ -83,9 +82,10 @@ INSERT INTO usuarios (
   email,
   senha,
   codigo_verificacao,
+  codigo_verificacao_expira,
   verificado
 )
-VALUES ($1,$2,$3,$4,FALSE)
+VALUES ($1,$2,$3,$4,NOW() + INTERVAL '10 minutes',FALSE)
             `,
             [
                 username,
@@ -168,10 +168,7 @@ app.post('/verificar-email', async (req, res) => {
             });
         }
 
-        if (
-            user.codigo_verificacao
-            !== codigo
-        ) {
+        if (!codigo || user.codigo_verificacao !== String(codigo) || !user.codigo_verificacao_expira || new Date(user.codigo_verificacao_expira) <= new Date()) {
             return res.status(400).json({
                 error:
                     'Código inválido'
@@ -183,7 +180,8 @@ app.post('/verificar-email', async (req, res) => {
             UPDATE usuarios
             SET
                 verificado=TRUE,
-                codigo_verificacao=NULL
+                codigo_verificacao=NULL,
+                codigo_verificacao_expira=NULL
             WHERE id=$1
             `,
             [user.id]
@@ -253,19 +251,12 @@ app.post(
         });
       }
 
-      // allow direct login (no code) for admin and professor convenience
-      if (["adm@formulavest.com", "prof@formulavest.com"].includes(user.email.toLowerCase())) {
-        return res.json({ ok: true, adminDirect: true });
-      }
-
-      const codigo = Math.floor(
-        100000 +
-        Math.random() * 900000
-      ).toString();
+      const codigo = crypto.randomInt(100000, 1000000).toString();
 
       await db.query(`
         UPDATE usuarios
-        SET codigo_verificacao=$1
+        SET codigo_verificacao=$1,
+            codigo_verificacao_expira=NOW() + INTERVAL '10 minutes'
         WHERE id=$2
       `, [
         codigo,
@@ -336,14 +327,14 @@ app.post(
         });
       }
 
-      // skip code verification for master admin and professor accounts
-      if (!["adm@formulavest.com", "prof@formulavest.com"].includes(user.email.toLowerCase())) {
-        if (user.codigo_verificacao !== codigo) {
-          return res.status(400).json({ error: "Código inválido" });
-        }
-
-        await db.query(`UPDATE usuarios SET codigo_verificacao=NULL WHERE id=$1`, [user.id]);
+      if (!user.verificado) {
+        return res.status(403).json({ error: 'Verifique seu email primeiro' });
       }
+
+      if (!codigo || user.codigo_verificacao !== String(codigo) || !user.codigo_verificacao_expira || new Date(user.codigo_verificacao_expira) <= new Date()) {
+        return res.status(400).json({ error: "Código inválido" });
+      }
+      await db.query(`UPDATE usuarios SET codigo_verificacao=NULL, codigo_verificacao_expira=NULL WHERE id=$1`, [user.id]);
 
       const token =
         gerarToken(user);
@@ -404,8 +395,7 @@ app.post(
         });
       }
 
-      const token =
-        crypto.randomUUID();
+      const token = crypto.randomBytes(32).toString('base64url');
 
       await db.query(`
         UPDATE usuarios
@@ -414,7 +404,7 @@ app.post(
           reset_expira=
             NOW() + INTERVAL '1 hour'
         WHERE email=$2
-      `, [token, email]);
+      `, [hashToken(token), email]);
 
       const resetHost = process.env.APP_URL || 'https://formulavest.onrender.com';
       const link = `${resetHost.replace(/\/$/, '')}/reset-password.html?token=${token}`;
@@ -456,6 +446,10 @@ app.post(
         senha
       } = req.body;
 
+      if (typeof token !== 'string' || token.length < 32 || token.length > 256) {
+        return res.status(400).json({ error: 'Token inválido ou expirado' });
+      }
+
       if (
         !senha ||
         senha.length < 8
@@ -474,7 +468,7 @@ app.post(
           FROM usuarios
           WHERE reset_token=$1
           AND reset_expira > NOW()
-        `, [token]);
+        `, [hashToken(token)]);
 
       const user =
         result.rows[0];
@@ -505,6 +499,7 @@ app.post(
         hash,
         user.id
       ]);
+      await db.query('DELETE FROM refresh_tokens WHERE user_id = $1', [user.id]);
 
       res.json({
         ok: true,
@@ -531,7 +526,7 @@ app.post('/token/refresh', async (req, res) => {
     const token = req.cookies?.refreshToken;
     if (!token) return res.status(401).json({ error: 'Refresh token ausente' });
 
-    const result = await db.query(`SELECT * FROM refresh_tokens WHERE token=$1`, [token]);
+    const result = await db.query(`SELECT * FROM refresh_tokens WHERE token=$1`, [hashToken(token)]);
     const row = result.rows[0];
     if (!row) return res.status(401).json({ error: 'Refresh token inválido' });
 
@@ -541,7 +536,7 @@ app.post('/token/refresh', async (req, res) => {
     }
 
     // load user
-    const userRes = await db.query(`SELECT * FROM usuarios WHERE id=$1`, [row.user_id]);
+    const userRes = await db.query(`SELECT * FROM usuarios WHERE id=$1 AND banido = FALSE AND verificado = TRUE`, [row.user_id]);
     const user = userRes.rows[0];
     if (!user) return res.status(401).json({ error: 'Usuário inválido' });
 

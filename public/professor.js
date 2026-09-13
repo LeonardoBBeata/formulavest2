@@ -58,6 +58,14 @@ function mostrarMensagem(texto) {
   if (pill) pill.textContent = texto;
 }
 
+function abrirSessaoAoVivo() {
+  document.querySelectorAll('.menu-btn').forEach((button) => {
+    button.classList.toggle('active', button.dataset.section === 'ao-vivo');
+  });
+  document.querySelectorAll('.page-section').forEach((section) => section.classList.add('hidden'));
+  el('ao-vivo')?.classList.remove('hidden');
+}
+
 function preencherQuestaoNoCard(card, questao) {
   if (!questao) return;
   card.querySelector('[data-enunciado]').value = questao.enunciado || '';
@@ -305,6 +313,8 @@ function renderLiveSession() {
   const roundCard = el('live-round-card');
   const ranking = el('ranking-live');
   const xlsBtn = el('download-xls-btn');
+  const startBtn = el('start-round-btn');
+  const nextBtn = el('next-round-btn');
 
   if (!panel || !activeSession?.prova) {
     panel?.classList.add('hidden');
@@ -317,6 +327,11 @@ function renderLiveSession() {
 
   const sessionFinished = !activeSession.started && activeSession.currentIndex >= 0 && activeSession.currentIndex === activeSession.prova.questoes.length - 1;
   if (xlsBtn) xlsBtn.disabled = !sessionFinished;
+  if (startBtn) {
+    startBtn.disabled = activeSession.started || sessionFinished;
+    startBtn.textContent = activeSession.started ? 'Rodada em andamento' : sessionFinished ? 'Rodada finalizada' : 'Iniciar rodada';
+  }
+  if (nextBtn) nextBtn.disabled = !activeSession.started || activeSession.showCorrectAnswer;
 
   if (!activeSession.started && activeSession.currentIndex < 0) {
     roundCard.innerHTML = `
@@ -436,7 +451,7 @@ function mostrarPodium() {
 }
 
 function iniciarRodadaAoVivo() {
-  if (!activeSession?.prova) return;
+  if (!activeSession?.prova || activeSession.started) return;
   activeSession.started = true;
   activeSession.currentIndex = 0;
   activeSession.showCorrectAnswer = false;
@@ -498,7 +513,7 @@ async function carregarProvas() {
       <div class="prova-item">
         <div>
           <strong>${escapeHtml(prova.titulo)}</strong>
-          <div class="prova-meta">${Number(prova.tempo_minutos)} min • Status: ${escapeHtml(prova.status || 'rascunho')} • Código: ${escapeHtml(prova.codigo || '—')}</div>
+          <div class="prova-meta">${Number(prova.tempo_minutos)} min • ${Number(prova.max_alunos) || 1} aluno(s) por prova • Status: ${escapeHtml(prova.status || 'rascunho')} • Código: ${escapeHtml(prova.codigo || '—')}</div>
         </div>
         <div class="prova-actions">
           <button class="btn btn-primary small" data-iniciar="${prova.id}">Transmitir</button>
@@ -519,6 +534,7 @@ async function carregarProvas() {
         const data = await res.json();
         if (data.ok) {
           activeSession = { prova: data.prova, currentIndex: -1, started: false, timeLeft: 0 };
+          abrirSessaoAoVivo();
           renderLiveSession();
           carregarPlacar();
           if (livePoll) clearInterval(livePoll);
@@ -685,6 +701,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const titulo = el('titulo-prova').value.trim();
     const tempo = Number(el('tempo-prova').value);
     const salaId = el('prova-sala-select')?.value;
+    const maxAlunos = Number(el('prova-max-alunos')?.value) || 1;
 
     if (!salaId) {
       alert('Selecione uma sala para a prova');
@@ -698,7 +715,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ titulo, tempo_minutos: tempo, sala_id: Number(salaId), questoes })
+        body: JSON.stringify({ titulo, tempo_minutos: tempo, sala_id: Number(salaId), max_alunos: maxAlunos, questoes })
       });
 
       const data = await res.json();

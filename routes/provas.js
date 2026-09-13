@@ -10,7 +10,8 @@ module.exports = function registerProvasRoutes(app, deps = {}) {
   const { PDFDocument, auth, cache, chamarIA, db, extrairJSONSeguro } = deps;
 
 function gerarCodigoProva() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
+  // Six bytes provide far more entropy than Math.random-derived room codes.
+  return crypto.randomBytes(6).toString('base64url').slice(0, 8).toUpperCase();
 }
 
 function removerGabarito(questoes) {
@@ -37,13 +38,23 @@ async function extrairTextoDoArquivo(filePath) {
 
   if (ext === '.pdf') {
     const data = await fs.promises.readFile(filePath);
-    const parsed = await pdfParse(data);
-    return String(parsed.text || '').trim();
+    try {
+      const parsed = await pdfParse(data);
+      return String(parsed.text || '').trim();
+    } catch (err) {
+      console.error('Erro ao ler PDF:', err.message || err);
+      throw new Error('Nao foi possivel ler este PDF. O arquivo pode estar corrompido, protegido ou ser uma imagem escaneada sem texto selecionavel. Tente reexportar o PDF (ex.: abrir e salvar novamente / imprimir como PDF) ou envie em formato DOCX.');
+    }
   }
 
   if (ext === '.docx') {
-    const result = await mammoth.extractRawText({ path: filePath });
-    return String(result.value || '').trim();
+    try {
+      const result = await mammoth.extractRawText({ path: filePath });
+      return String(result.value || '').trim();
+    } catch (err) {
+      console.error('Erro ao ler DOCX:', err.message || err);
+      throw new Error('Nao foi possivel ler este arquivo DOCX. Verifique se ele nao esta corrompido e tente novamente.');
+    }
   }
 
   throw new Error('Formato de arquivo nao suportado');
@@ -320,18 +331,23 @@ RETORNE SOMENTE JSON VÁLIDO:
     console.log("JSON EXTRAÍDO:");
     console.log(json);
 
-    if (
-      !json ||
-      !json.questoes ||
-      !Array.isArray(json.questoes)
-    ) {
+    if (!json || !Array.isArray(json.questoes) || json.questoes.length === 0) {
       return res.status(500).json({
         error:
           "IA retornou formato inválido"
       });
     }
 
+    // A prova precisa existir no banco antes de ser exibida. Sem este registro o
+    // front-end recebia questões, mas não recebia um prova_id para finalizar.
+    const result = await db.query(`
+      INSERT INTO provas_ativas(usuario_id, questoes)
+      VALUES($1, $2)
+      RETURNING id
+    `, [req.user.id, JSON.stringify(json.questoes)]);
+
     return res.json({
+      prova_id: result.rows[0].id,
       questoes: json.questoes
     });
 
@@ -1063,8 +1079,9 @@ app.post(
         return res.status(403).json({ error: "Sem permissao" });
       }
 
-      const { titulo, tempo_minutos, sala_id, questoes } = req.body;
+      const { titulo, tempo_minutos, sala_id, questoes, max_alunos } = req.body;
       const tempo = Number(tempo_minutos);
+      const maxAlunos = Math.min(Math.max(Number(max_alunos) || 1, 1), 3);
 
       if (!titulo || !tempo || tempo <= 0) {
         return res.status(400).json({ error: "Titulo e tempo sao obrigatorios" });
@@ -1131,9 +1148,10 @@ app.post(
           sala_id,
           titulo,
           tempo_minutos,
+          max_alunos,
           questoes
         )
-        VALUES($1,$2,$3,$4,$5,$6)
+        VALUES($1,$2,$3,$4,$5,$6,$7)
         RETURNING *
       `, [
         req.user.id,
@@ -1141,6 +1159,7 @@ app.post(
         s.id,
         titulo,
         tempo,
+        maxAlunos,
         JSON.stringify(questoesNormalizadas)
       ]);
 
@@ -1317,6 +1336,7 @@ app.get('/professor/provas/:id/pdf', auth, async (req, res) => {
 
     const profRes = await db.query(`SELECT username FROM usuarios WHERE id = $1`, [prova.professor_id]);
     const professorNome = profRes.rows[0]?.username || 'Professor';
+    const maxAlunos = Math.min(Math.max(Number(prova.max_alunos) || 1, 1), 3);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="prova_${prova.id}.pdf"`);
@@ -1324,29 +1344,58 @@ app.get('/professor/provas/:id/pdf', auth, async (req, res) => {
     const doc = new PDFDocument({ margin: 50, size: 'A4', bufferPages: true });
     doc.pipe(res);
 
-    const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const marginLeft = doc.page.margins.left;
+    const marginTop = doc.page.margins.top;
+    const marginBottom = doc.page.margins.bottom;
+    const pageWidth = doc.page.width - marginLeft - doc.page.margins.right;
+    const pageBottomLimit = doc.page.height - marginBottom;
+    const HEADER_HEIGHT = 70;
+    const CONTENT_TOP = marginTop + HEADER_HEIGHT + 15;
 
-    // Cabeçalho
-    doc.rect(doc.page.margins.left, doc.page.margins.top, pageWidth, 70).fill('#0b3d91');
-    doc.fillColor('#ffffff').fontSize(20).font('Helvetica-Bold')
-      .text('FórmulaVest', doc.page.margins.left + 15, doc.page.margins.top + 12);
-    doc.fontSize(10).font('Helvetica')
-      .text('Prova impressa para aplicação em sala de aula', doc.page.margins.left + 15, doc.page.margins.top + 40);
+    function desenharCabecalho() {
+      doc.rect(marginLeft, marginTop, pageWidth, HEADER_HEIGHT).fill('#0b3d91');
+      doc.fillColor('#ffffff').fontSize(20).font('Helvetica-Bold')
+        .text('FórmulaVest', marginLeft + 15, marginTop + 12, { lineBreak: false });
+      doc.fontSize(10).font('Helvetica')
+        .text('Prova impressa para aplicação em sala de aula', marginLeft + 15, marginTop + 40, { lineBreak: false });
+      doc.fontSize(9).fillColor('#dbe7ff')
+        .text(String(prova.titulo || 'Prova'), marginLeft + 15, marginTop + 54, { width: pageWidth - 160, lineBreak: false });
+      doc.fontSize(9).fillColor('#dbe7ff')
+        .text(`Código: ${prova.codigo || '—'}`, marginLeft + pageWidth - 140, marginTop + 54, { width: 140, align: 'right', lineBreak: false });
+    }
 
-    doc.y = doc.page.margins.top + 85;
-    doc.x = doc.page.margins.left;
+    function novaPagina() {
+      doc.addPage();
+      desenharCabecalho();
+      doc.y = CONTENT_TOP;
+      doc.x = marginLeft;
+    }
+
+    function garantirEspaco(altura) {
+      if (doc.y + altura > pageBottomLimit) {
+        novaPagina();
+      }
+    }
+
+    // Primeira página
+    desenharCabecalho();
+    doc.y = CONTENT_TOP;
+    doc.x = marginLeft;
 
     // Bloco de metadados em caixa
-    const metaTop = doc.y;
-    doc.roundedRect(doc.page.margins.left, metaTop, pageWidth, 100, 6).stroke('#c9d6f2');
+    const metaHeight = 100;
+    garantirEspaco(metaHeight + 10);
+
+    const boxTop = doc.y;
+    doc.roundedRect(marginLeft, boxTop, pageWidth, metaHeight, 6).stroke('#c9d6f2');
     doc.fillColor('#0b3d91').fontSize(11).font('Helvetica-Bold')
-      .text(String(prova.titulo || 'Prova'), doc.page.margins.left + 12, metaTop + 10, { width: pageWidth - 24 });
+      .text(String(prova.titulo || 'Prova'), marginLeft + 12, boxTop + 10, { width: pageWidth - 24 });
 
     doc.fillColor('#333').fontSize(9).font('Helvetica');
     const colWidth = (pageWidth - 24) / 2;
-    const leftX = doc.page.margins.left + 12;
+    const leftX = marginLeft + 12;
     const rightX = leftX + colWidth;
-    let rowY = metaTop + 30;
+    let rowY = boxTop + 30;
 
     doc.text(`Escola: ${meta.escola_nome || '—'}`, leftX, rowY, { width: colWidth - 10 });
     doc.text(`Período: ${meta.periodo_nome || '—'}`, rightX, rowY, { width: colWidth - 10 });
@@ -1360,62 +1409,75 @@ app.get('/professor/provas/:id/pdf', auth, async (req, res) => {
     doc.text(`Duração: ${prova.tempo_minutos ? prova.tempo_minutos + ' minutos' : '—'}`, leftX, rowY, { width: colWidth - 10 });
     doc.text(`Total de questões: ${prova.questoes.length}`, rightX, rowY, { width: colWidth - 10 });
 
-    doc.y = metaTop + 110;
-    doc.x = doc.page.margins.left;
+    doc.y = boxTop + metaHeight + 15;
+    doc.x = marginLeft;
 
-    // Campos de identificação do aluno
-    doc.fontSize(9).fillColor('#000');
-    doc.text('Nome do aluno: ________________________________________________________________');
+    // Campos de identificação dos alunos (1 a 3, conforme configurado)
+    const identBoxHeight = 26 + (maxAlunos * 18);
+    garantirEspaco(identBoxHeight + 10);
+
+    doc.fillColor('#0b3d91').fontSize(9.5).font('Helvetica-Bold')
+      .text(maxAlunos > 1 ? `Identificação dos alunos (até ${maxAlunos})` : 'Identificação do aluno', marginLeft, doc.y);
     doc.moveDown(0.4);
-    doc.text('Turma: _____________________________      Nota: _____________________________');
+
+    doc.font('Helvetica').fillColor('#000').fontSize(9);
+    for (let i = 0; i < maxAlunos; i++) {
+      doc.text(`${i + 1}) Nome: ______________________________________________      Turma: _________________`);
+      doc.moveDown(0.35);
+    }
+
+    doc.text('Nota final: ________________________________________________________________________');
     doc.moveDown(1);
 
+    // Questões
     prova.questoes.forEach((q, index) => {
-      const blocoAltura = 90 + (Object.keys(q.opcoes || {}).length * 14);
-      if (doc.y + blocoAltura > doc.page.height - doc.page.margins.bottom) {
-        doc.addPage();
-      }
+      const numOpcoes = Object.keys(q.opcoes || {}).length;
+      const enunciadoLinhas = Math.ceil((q.enunciado || '').length / 95) + 1;
+      const alturaEstimada = 26 + (enunciadoLinhas * 13) + (numOpcoes * 15) + 40;
+
+      garantirEspaco(alturaEstimada);
 
       const numeroTop = doc.y;
-      doc.circle(doc.page.margins.left + 8, numeroTop + 8, 10).fill('#0b3d91');
+      doc.circle(marginLeft + 9, numeroTop + 9, 10).fill('#0b3d91');
       doc.fillColor('#fff').fontSize(9).font('Helvetica-Bold')
-        .text(String(index + 1), doc.page.margins.left + 2, numeroTop + 4, { width: 14, align: 'center' });
+        .text(String(index + 1), marginLeft, numeroTop + 5, { width: 18, align: 'center', lineBreak: false });
 
       doc.fillColor('#000').fontSize(10.5).font('Helvetica-Bold')
-        .text('Questão', doc.page.margins.left + 24, numeroTop, { continued: false });
+        .text('Questão ' + (index + 1), marginLeft + 26, numeroTop + 1, { width: pageWidth - 26 });
 
-      doc.moveDown(0.3);
-      doc.x = doc.page.margins.left;
+      doc.y = numeroTop + 22;
+      doc.x = marginLeft;
       doc.fontSize(10).font('Helvetica').fillColor('#111')
-        .text(q.enunciado || '', { align: 'justify' });
-      doc.moveDown(0.35);
+        .text(q.enunciado || '', marginLeft, doc.y, { width: pageWidth, align: 'justify' });
+      doc.moveDown(0.4);
 
       Object.entries(q.opcoes || {}).forEach(([letra, texto]) => {
+        garantirEspaco(16);
+        const optTop = doc.y;
+        doc.circle(marginLeft + 6, optTop + 6, 5).lineWidth(0.8).stroke('#0b3d91');
         doc.fontSize(9.5).font('Helvetica-Bold').fillColor('#0b3d91')
-          .text(`${letra})`, doc.page.margins.left + 8, doc.y, { continued: true, width: 20 });
-        doc.font('Helvetica').fillColor('#222').text(` ${texto}`, { width: pageWidth - 30 });
+          .text(letra, marginLeft, optTop + 1, { width: 14, align: 'center', lineBreak: false });
+        doc.font('Helvetica').fillColor('#222').fontSize(9.5)
+          .text(String(texto || ''), marginLeft + 20, optTop, { width: pageWidth - 20 });
+        doc.y = Math.max(doc.y, optTop + 15);
+        doc.x = marginLeft;
       });
 
-      doc.moveDown(0.3);
-      doc.fontSize(9).fillColor('#666')
-        .text('Resposta: ______________________________________________________________________');
-      doc.moveDown(0.9);
-
-      // linha separadora fina
-      doc.moveTo(doc.page.margins.left, doc.y).lineTo(doc.page.margins.left + pageWidth, doc.y).strokeColor('#e5e5e5').stroke();
+      doc.moveDown(0.5);
+      doc.moveTo(marginLeft, doc.y).lineTo(marginLeft + pageWidth, doc.y).strokeColor('#e5e5e5').lineWidth(1).stroke();
       doc.moveDown(0.7);
     });
 
-    // Rodapé com numeração de página
+    // Rodapé com numeração de página em todas as páginas
     const pageRange = doc.bufferedPageRange();
     for (let i = 0; i < pageRange.count; i++) {
       doc.switchToPage(i);
       doc.fontSize(8).fillColor('#999')
         .text(
           `FórmulaVest • ${prova.titulo || ''} • Página ${i + 1} de ${pageRange.count}`,
-          doc.page.margins.left,
-          doc.page.height - doc.page.margins.bottom + 15,
-          { width: pageWidth, align: 'center' }
+          marginLeft,
+          doc.page.height - marginBottom + 15,
+          { width: pageWidth, align: 'center', lineBreak: false }
         );
     }
 
@@ -1457,12 +1519,11 @@ app.post("/provas-prontas/entrar", auth, async (req, res) => {
       return res.status(400).json({ error: "Tempo da prova encerrado" });
     }
 
-    if (
-      req.user.role === "aluno" &&
-      prova.sala_id &&
-      req.user.sala_id &&
-      prova.sala_id !== req.user.sala_id
-    ) {
+    if (req.user.role !== 'aluno') {
+      return res.status(403).json({ error: 'Apenas alunos podem responder provas' });
+    }
+
+    if (prova.sala_id && Number(prova.sala_id) !== Number(req.user.sala_id)) {
       return res.status(403).json({ error: "Prova nao pertence a sua sala" });
     }
 
@@ -1471,10 +1532,46 @@ app.post("/provas-prontas/entrar", auth, async (req, res) => {
       FROM respostas_provas_professor
       WHERE prova_id = $1
       AND aluno_id = $2
+      AND finalizada = TRUE
     `, [prova.id, req.user.id]);
 
     if (jaRespondeu.rows.length > 0) {
       return res.status(400).json({ error: "Voce ja finalizou esta prova" });
+    }
+
+    const maxAlunos = Number(prova.max_alunos) || 1;
+
+    // Serialize admissions per prova. A count followed by an insert without this
+    // lock allowed simultaneous requests to exceed max_alunos.
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT id FROM provas_professor WHERE id = $1 FOR UPDATE', [prova.id]);
+      const participanteExistente = await client.query(
+        'SELECT id FROM provas_professor_participantes WHERE prova_id = $1 AND aluno_id = $2',
+        [prova.id, req.user.id]
+      );
+
+      if (participanteExistente.rows.length === 0) {
+        const totalParticipantes = await client.query(
+          'SELECT COUNT(*) AS total FROM provas_professor_participantes WHERE prova_id = $1',
+          [prova.id]
+        );
+        if (Number(totalParticipantes.rows[0].total) >= maxAlunos) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: `Esta prova ja atingiu o limite de ${maxAlunos} aluno(s)` });
+        }
+        await client.query(
+          'INSERT INTO provas_professor_participantes(prova_id, aluno_id) VALUES($1, $2) ON CONFLICT DO NOTHING',
+          [prova.id, req.user.id]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
     }
 
     res.json({
@@ -1805,6 +1902,19 @@ app.post("/provas-prontas/:id/responder", auth, async (req, res) => {
     }
 
     const provaAtiva = prova.rows[0];
+    if (provaAtiva.sala_id && Number(provaAtiva.sala_id) !== Number(req.user.sala_id)) {
+      return res.status(403).json({ error: 'Prova nao pertence a sua sala' });
+    }
+    if (new Date(provaAtiva.encerra_em).getTime() <= Date.now()) {
+      return res.status(400).json({ error: 'Tempo da prova encerrado' });
+    }
+    const participante = await db.query(
+      'SELECT id FROM provas_professor_participantes WHERE prova_id = $1 AND aluno_id = $2',
+      [provaAtiva.id, req.user.id]
+    );
+    if (participante.rows.length === 0) {
+      return res.status(403).json({ error: 'Entre na prova antes de responder' });
+    }
     const respostasAtual = Array.isArray(respostas) ? respostas.slice(0, provaAtiva.questoes.length) : [];
     const indice = Number.isInteger(Number(perguntaIndex)) ? Number(perguntaIndex) : respostasAtual.length - 1;
 
@@ -1838,6 +1948,7 @@ app.post("/provas-prontas/:id/responder", auth, async (req, res) => {
         total = EXCLUDED.total,
         percentual = EXCLUDED.percentual,
         finalizada_em = NOW()
+      WHERE respostas_provas_professor.finalizada = FALSE
     `, [
       provaAtiva.id,
       req.user.id,
@@ -1879,6 +1990,17 @@ app.post("/provas-prontas/:id/finalizar", auth, async (req, res) => {
       return res.status(404).json({ error: "Prova nao encontrada ou encerrada" });
     }
 
+    if (prova.sala_id && Number(prova.sala_id) !== Number(req.user.sala_id)) {
+      return res.status(403).json({ error: 'Prova nao pertence a sua sala' });
+    }
+    const participante = await db.query(
+      'SELECT id FROM provas_professor_participantes WHERE prova_id = $1 AND aluno_id = $2',
+      [prova.id, req.user.id]
+    );
+    if (participante.rows.length === 0) {
+      return res.status(403).json({ error: 'Entre na prova antes de finalizar' });
+    }
+
     if (new Date(prova.encerra_em).getTime() <= Date.now()) {
       await db.query(`
         UPDATE provas_professor
@@ -1894,6 +2016,7 @@ app.post("/provas-prontas/:id/finalizar", auth, async (req, res) => {
       FROM respostas_provas_professor
       WHERE prova_id = $1
       AND aluno_id = $2
+      AND finalizada = TRUE
     `, [prova.id, req.user.id]);
 
     if (jaRespondeu.rows.length > 0) {
@@ -1928,14 +2051,16 @@ app.post("/provas-prontas/:id/finalizar", auth, async (req, res) => {
         respostas,
         acertos,
         total,
-        percentual
+        percentual,
+        finalizada
       )
-      VALUES($1,$2,$3,$4,$5,$6)
+      VALUES($1,$2,$3,$4,$5,$6,TRUE)
       ON CONFLICT (prova_id, aluno_id) DO UPDATE SET
         respostas = EXCLUDED.respostas,
         acertos = EXCLUDED.acertos,
         total = EXCLUDED.total,
         percentual = EXCLUDED.percentual,
+        finalizada = TRUE,
         finalizada_em = NOW()
     `, [
       prova.id,
