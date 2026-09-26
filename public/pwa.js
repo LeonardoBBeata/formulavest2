@@ -33,6 +33,9 @@ window.addEventListener('appinstalled', () => {
   document.querySelector('.install-banner')?.remove();
 });
 
-if ('Notification' in window && Notification.permission === 'granted') {
-  new Notification('FórmulaVest pronto', { body: 'Receba lembretes de estudo e metas.' });
-}
+window.ativarLembretesDeEstudo = async () => {
+  if (!('Notification' in window)) return false;
+  const permission = await Notification.requestPermission();
+  localStorage.setItem('notificacoesAtivas', String(permission === 'granted'));
+  return permission === 'granted';
+};

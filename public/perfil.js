@@ -1,7 +1,8 @@
 const API = window.location.origin;
-const token = localStorage.getItem("token");
+const token = null;
+const hasSession = localStorage.getItem('auth_session') === '1';
 
-if (!token) window.location.href = "/login.html";
+if (!hasSession) window.location.href = "/login.html";
 
 // elementos
 const el = (id) => document.getElementById(id);
@@ -60,28 +61,59 @@ el("foto-input").addEventListener("change", async (e) => {
 // SALVAR PERFIL
 // ======================
 el("salvar-btn").addEventListener("click", async () => {
-  const res = await fetch(`${API}/atualizar-perfil`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`
-    },
-    body: JSON.stringify({
-      nome: el("nome").value,
-      email: el("email").value,
-      senha: el("senha").value
-    })
-  });
+  try {
+    const res = await fetch(`${API}/atualizar-perfil`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        nome: el("nome").value,
+        email: el("email").value,
+        senha_atual: el("senha-atual").value,
+        senha: el("senha").value
+      })
+    });
 
-  const data = await res.json();
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Erro ao atualizar perfil");
 
-  alert("Perfil atualizado!");
+    if (data.email_confirmation_required) {
+      const codigo = window.prompt("Digite o código enviado para o novo email:");
+      if (!codigo) {
+        alert("Email pendente de confirmação. Salve novamente para reenviar o código.");
+        return;
+      }
+      const confirmacao = await fetch(`${API}/atualizar-email/confirmar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: el("email").value, codigo })
+      });
+      const resultado = await confirmacao.json();
+      if (!confirmacao.ok) throw new Error(resultado.error || "Código inválido");
+    }
+
+    if (data.session_revoked || data.email_confirmation_required) {
+      alert("Alterações concluídas. Entre novamente com suas credenciais.");
+      localStorage.removeItem("auth_session");
+      window.location.href = "/login.html";
+      return;
+    }
+
+    el("senha-atual").value = "";
+    el("senha").value = "";
+    alert("Perfil atualizado!");
+  } catch (error) {
+    alert(error.message || "Erro ao atualizar perfil");
+  }
 });
 
 // ======================
 // LOGOUT
 // ======================
-el("logout-btn").addEventListener("click", () => {
-  localStorage.removeItem("token");
+el("logout-btn").addEventListener("click", async () => {
+  await fetch('/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+  localStorage.removeItem('auth_session');
   window.location.href = "/login.html";
 });

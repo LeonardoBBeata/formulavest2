@@ -1,7 +1,8 @@
 const API = window.location.origin;
-const token = localStorage.getItem("token");
+const token = null;
+const hasSession = localStorage.getItem('auth_session') === '1';
 
-if (!token) window.location.href = "/login.html";
+if (!hasSession) window.location.href = "/login.html";
 
 // ======================
 // STATE
@@ -17,6 +18,19 @@ let planoDia = JSON.parse(localStorage.getItem("planoDia") || "[]");
 let notificacoesAtivas = localStorage.getItem("notificacoesAtivas") === "true";
 let temaAtual = localStorage.getItem("theme") || "dark";
 let menuLateralEncolhido = localStorage.getItem("sidebarCollapsed") === "true";
+
+const ACHIEVEMENTS = [
+  { key: 'primeira_prova', icon: '🎯', title: 'Primeiros passos', desc: 'Concluiu a primeira prova.' },
+  { key: 'tres_provas', icon: '⚡', title: 'Em ritmo', desc: 'Concluiu 3 provas.' },
+  { key: 'dez_provas', icon: '🏅', title: '10 provas', desc: 'Concluiu 10 provas.' },
+  { key: 'cinquenta_provas', icon: '👑', title: 'Veterano', desc: 'Concluiu 50 provas.' },
+  { key: 'prova_perfeita', icon: '💯', title: 'Nota máxima', desc: 'Acertou uma prova inteira.' },
+  { key: 'xp_100', icon: '✨', title: '100 XP', desc: 'Alcançou seus primeiros 100 XP.' },
+  { key: 'nivel_5', icon: '🚀', title: 'Nível 5', desc: 'Chegou ao nível 5.' },
+  { key: 'nivel_10', icon: '🌟', title: 'Nível 10', desc: 'Chegou ao nível 10.' },
+  { key: 'streak_3', icon: '🔥', title: 'Constância', desc: 'Estudou por 3 dias seguidos.' },
+  { key: 'streak_7', icon: '🏆', title: 'Semana imparável', desc: 'Estudou por 7 dias seguidos.' }
+];
 
 // ======================
 // INIT
@@ -138,54 +152,63 @@ async function carregarConquistas() {
         <p>Nível: <strong>${data.nivel || 1}</strong></p>
         <p>Provas: <strong>${data.total || 0}</strong></p>
       </div>
-      <div class="card">
-        <h4>Conquistas</h4>
-        <ul>
-          <li>Primeira prova: ${c.primeira_prova ? '✅' : '❌'}</li>
-          <li>10 provas: ${c.dez_provas ? '✅' : '❌'}</li>
-          <li>50 provas: ${c.cinquenta_provas ? '✅' : '❌'}</li>
-          <li>Nível 10: ${c.nivel_10 ? '✅' : '❌'}</li>
-        </ul>
+      <div class="card conquistas-resumo">
+        <h4>Conquistas desbloqueadas</h4>
+        <div class="conquistas-mini-grid">
+          ${ACHIEVEMENTS.map(achievement => `
+            <div class="conquista-mini ${c[achievement.key] ? 'conquistada' : 'bloqueada'}" title="${escapeHtml(achievement.desc)}">
+              <span>${achievement.icon}</span><small>${escapeHtml(achievement.title)}</small>
+            </div>
+          `).join('')}
+        </div>
       </div>
       <div class="card">
         <h4>Histórico</h4>
         ${hist.length ? ('<ul>' + hist.map(h => `<li><strong>${escapeHtml(h.titulo)}</strong> — ${escapeHtml(h.descricao)} <small>(${escapeHtml(new Date(h.criado_em).toLocaleString())})</small></li>`).join('') + '</ul>') : '<p>Sem histórico ainda.</p>'}
       </div>
     `;
-    // detect new unlocks and notify
-    try {
-      const seenKey = 'conquistas_seen_v1';
-      const seen = JSON.parse(sessionStorage.getItem(seenKey) || '[]');
-      const unlocked = [];
-      if (c.primeira_prova && !seen.includes('primeira_prova')) unlocked.push('Primeira prova');
-      if (c.dez_provas && !seen.includes('dez_provas')) unlocked.push('10 provas');
-      if (c.cinquenta_provas && !seen.includes('cinquenta_provas')) unlocked.push('50 provas');
-      if (c.nivel_10 && !seen.includes('nivel_10')) unlocked.push('Nível 10');
-      if (c.streak_7 && !seen.includes('streak_7')) unlocked.push('Streak 7 dias');
-      if (unlocked.length) {
-        mostrarToast('Nova conquista: ' + unlocked.join(', '));
-        if (Notification && Notification.permission === 'granted') {
-          new Notification('FórmulaVest', { body: 'Nova conquista: ' + unlocked.join(', ') });
-        }
-      }
-      const nowSeen = new Set(seen);
-      if (c.primeira_prova) nowSeen.add('primeira_prova');
-      if (c.dez_provas) nowSeen.add('dez_provas');
-      if (c.cinquenta_provas) nowSeen.add('cinquenta_provas');
-      if (c.nivel_10) nowSeen.add('nivel_10');
-      if (c.streak_7) nowSeen.add('streak_7');
-      sessionStorage.setItem(seenKey, JSON.stringify(Array.from(nowSeen)));
-    } catch (e) { console.warn('conquistas notify', e); }
+    (data.novas_conquistas || []).forEach((achievement, index) => {
+      const definition = ACHIEVEMENTS.find(item => item.key === achievement.chave);
+      window.setTimeout(() => mostrarPopupConquista({
+        ...achievement,
+        icon: definition?.icon || '🏆'
+      }), index * 600);
+    });
   } catch (err) {
     console.error('Erro carregar conquistas', err);
   }
+}
+
+function mostrarPopupConquista(achievement) {
+  let stack = el('achievement-stack');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.id = 'achievement-stack';
+    stack.setAttribute('aria-live', 'polite');
+    document.body.appendChild(stack);
+  }
+
+  const popup = document.createElement('article');
+  popup.className = 'achievement-popup';
+  popup.innerHTML = `
+    <div class="achievement-popup__icon">${escapeHtml(achievement.icon || '🏆')}</div>
+    <div><small>CONQUISTA DESBLOQUEADA</small><strong>${escapeHtml(achievement.titulo)}</strong><p>${escapeHtml(achievement.descricao)}</p></div>
+    <button type="button" class="achievement-popup__close" aria-label="Fechar">×</button>
+  `;
+  popup.querySelector('.achievement-popup__close')?.addEventListener('click', () => popup.remove());
+  stack.appendChild(popup);
+  window.setTimeout(() => popup.classList.add('is-visible'), 30);
+  window.setTimeout(() => {
+    popup.classList.remove('is-visible');
+    window.setTimeout(() => popup.remove(), 240);
+  }, 6000);
 }
 
 async function configurarAcessoProfessor() {
   const linkProfessor = el("link-professor");
   if (!linkProfessor) return;
 
-  if (!token) {
+  if (!hasSession) {
     linkProfessor.classList.add("hidden");
     return;
   }
@@ -253,31 +276,30 @@ async function carregarDashboard() {
 
     const data = await res.json();
     const provas = Array.isArray(data.provas) ? data.provas : [];
-    const total = provas.length;
-
-    const media =
-      total > 0
-        ? (provas.reduce((a, p) => a + Number(p.acertos || 0), 0) / total).toFixed(1)
-        : 0;
-
-    const melhor =
-      total > 0
-        ? Math.max(...provas.map(p => Number(p.acertos || 0)))
-        : 0;
+    const resumo = data.resumo || {};
+    const total = Number(resumo.total_provas ?? provas.length);
+    const media = Number(resumo.percentual_geral || 0);
+    const melhor = Number(resumo.melhor_percentual || 0);
 
     const container = el("dashboard-container");
     if (container) {
       container.innerHTML = `
         <div class="card">
-          <p>Total de provas: ${total}</p>
-          <p>Média de acertos: ${media}</p>
-          <p>Melhor score: ${melhor}</p>
+          <p>Total de provas concluídas: <strong>${total}</strong></p>
+          <p>Precisão geral: <strong>${media.toFixed(1)}%</strong></p>
+          <p>Melhor resultado: <strong>${melhor.toFixed(1)}%</strong></p>
         </div>
       `;
     }
 
-    if (el("nivel-user")) el("nivel-user").innerText = data.user?.nivel ?? 1;
-    if (el("xp-total")) el("xp-total").innerText = data.user?.xp ?? 0;
+    const xp = Number(data.user?.xp || 0);
+    const nivel = Number(data.user?.nivel || 1);
+    const xpNoNivel = xp % 100;
+    if (el("nivel-user")) el("nivel-user").innerText = nivel;
+    if (el("xp-total")) el("xp-total").innerText = `${xp} XP`;
+    if (el("xp-bar-fill")) el("xp-bar-fill").style.width = `${xpNoNivel}%`;
+    if (el("stat-acertos")) el("stat-acertos").innerText = `${media.toFixed(0)}%`;
+    if (el("stat-sessoes")) el("stat-sessoes").innerText = total;
   } catch (error) {
     console.error(error);
     const container = el("dashboard-container");
@@ -329,16 +351,22 @@ async function carregarRanking() {
 // GRÁFICO SIMPLES (EVOLUÇÃO DE ACERTOS)
 // ======================
 async function carregarGrafico() {
+  if (typeof Chart === 'undefined') return;
+
   const res = await fetch(`${API}/dashboard`, {
     headers: { Authorization: `Bearer ${token}` }
   });
+  if (!res.ok) return;
 
   const data = await res.json();
-
-  const provas = data.provas || [];
-
-  const labels = provas.map((_, i) => `Prova ${i + 1}`);
-  const acertos = provas.map(p => p.acertos);
+  const provas = Array.isArray(data.provas) ? data.provas : [];
+  const labels = provas.map((prova, index) => {
+    const dataProva = prova.criado_em ? new Date(prova.criado_em) : null;
+    return dataProva && !Number.isNaN(dataProva.getTime())
+      ? dataProva.toLocaleDateString('pt-BR')
+      : `Prova ${index + 1}`;
+  });
+  const percentuais = provas.map(prova => Number(prova.percentual || 0));
 
   const ctx = el("graficoEvolucao");
   if (!ctx) return;
@@ -350,8 +378,8 @@ async function carregarGrafico() {
     data: {
       labels,
       datasets: [{
-        label: "Acertos por prova",
-        data: acertos,
+        label: "Precisão por prova (%)",
+        data: percentuais,
         borderWidth: 2,
         tension: 0.3
       }]
@@ -360,6 +388,7 @@ async function carregarGrafico() {
       scales: {
         y: {
           beginAtZero: true,
+          max: 100,
           ticks: {
             precision: 0
           }
@@ -510,7 +539,6 @@ function selecionar(index, letra, elClicked) {
 async function salvarResultado() {
   try {
     const respostas = questoes.map((q, i) => ({
-      correta: q.correta,
       selecionada: respostasUser[i] || null
     }));
 
@@ -527,24 +555,47 @@ async function salvarResultado() {
 
     const data = await res.json();
 
-    const finalScreen = el("final-screen");
-    const finalText = el("final-text");
-
-    if (finalScreen) finalScreen.classList.remove("hidden");
-    if (finalText) {
-      finalText.innerHTML = `
-        <p>Acertos: ${data.acertos ?? 0}</p>
-        <p>Percentual: ${(Number(data.percentual) || 0).toFixed(1)}%</p>
-      `;
-    }
+    mostrarResultadoDaProva(data);
 
     await carregarDashboard();
     await carregarRanking();
     await carregarGrafico();
+    await carregarConquistas();
   } catch (error) {
     console.error(error);
     mostrarToast('Não foi possível salvar a prova. Tente novamente.');
   }
+}
+
+function mostrarResultadoDaProva(data) {
+  const total = Number(data.total || questoes.length || 0);
+  const acertos = Number(data.acertos || 0);
+  const percentual = Number(data.percentual || 0);
+  const xpGanho = Number(data.xp_ganho || 0);
+  const nivel = Number(data.nivel || 1);
+  const subiuNivel = Boolean(data.subiu_nivel);
+  const finalScreen = el("final-screen");
+  const finalText = el("final-text");
+  const mensagem = el("resultado-mensagem");
+  const titulo = el("resultado-title");
+
+  if (titulo) titulo.textContent = subiuNivel ? `Nível ${nivel} desbloqueado!` : "Resultado disponível";
+  if (mensagem) {
+    mensagem.textContent = subiuNivel
+      ? "Seu desempenho fez você subir de nível. Continue nessa sequência!"
+      : percentual >= 70
+        ? "Ótimo desempenho — você está no caminho certo."
+        : "Cada questão respondida fortalece a sua preparação.";
+  }
+  if (finalText) {
+    finalText.innerHTML = `
+      <div><strong>${acertos}/${total}</strong><span>acertos</span></div>
+      <div><strong>${percentual.toFixed(1)}%</strong><span>precisão</span></div>
+      <div><strong>+${xpGanho}</strong><span>XP ganho</span></div>
+      <div><strong>${nivel}</strong><span>nível atual</span></div>
+    `;
+  }
+  finalScreen?.classList.remove("hidden");
 }
 
 // ======================
@@ -660,12 +711,9 @@ function atualizarPainelEstatisticas() {
   const sessoes = Number(localStorage.getItem("sessoesSemana") || 0);
   const concluidas = metas.filter(m => m.feito).length;
   const total = metas.length || 1;
-  const precisao = Math.min(100, Math.round((concluidas / total) * 100));
   const streak = Number(localStorage.getItem("streak") || 0);
 
-  el("stat-sessoes").innerText = sessoes;
   el("stat-metas").innerText = `${concluidas}/${total}`;
-  el("stat-acertos").innerText = `${precisao}%`;
   el("stat-ritmo").innerText = `${streak} dias`;
 }
 
@@ -813,8 +861,9 @@ if (notificacoesAtivas) {
 // LOGOUT
 // ======================
 function configurarLogout() {
-  el("logout-btn")?.addEventListener("click", () => {
-    localStorage.removeItem("token");
+  el("logout-btn")?.addEventListener("click", async () => {
+    await fetch('/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+    localStorage.removeItem('auth_session');
     window.location.href = "/login.html";
   });
 }

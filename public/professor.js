@@ -1,7 +1,8 @@
 const API = window.location.origin;
-const token = localStorage.getItem('token');
+const token = null;
+const hasSession = localStorage.getItem('auth_session') === '1';
 
-if (!token) {
+if (!hasSession) {
   window.location.href = '/login.html';
 }
 
@@ -15,7 +16,7 @@ function escapeHtml(value = '') {
 }
 
 async function verificarAcessoProfessor() {
-  if (!token) {
+  if (!hasSession) {
     window.location.href = '/login.html';
     return false;
   }
@@ -846,8 +847,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.error('Erro carregar turmas', err);
   }
 
-  el('logout-btn')?.addEventListener('click', () => {
-    localStorage.removeItem('token');
+  el('logout-btn')?.addEventListener('click', async () => {
+    await fetch('/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+    localStorage.removeItem('auth_session');
     window.location.href = '/login.html';
   });
 

@@ -1,0 +1,16 @@
+.git
+.github
+node_modules
+.env
+.env.*
+!.env.example
+uploads
+public/uploads
+docs/_qc_*
+scripts/__pycache__
+*.pyc
+tmp_*
+database.db
+armazem.txt
+texte.txt
+npm-debug.log*

@@ -571,6 +571,27 @@ body {
 }
 
 /* ======================
+   CONQUISTAS
+====================== */
+.conquistas-mini-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 10px; margin-top: 14px; }
+.conquista-mini { min-height: 88px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; border-radius: 14px; border: 1px solid var(--border); text-align: center; transition: transform .2s ease, opacity .2s ease; }
+.conquista-mini span { font-size: 1.45rem; }
+.conquista-mini small { color: var(--muted); font-size: .7rem; line-height: 1.2; }
+.conquista-mini.conquistada { background: linear-gradient(145deg, rgba(251, 191, 36, .16), rgba(79, 140, 255, .12)); border-color: rgba(251, 191, 36, .34); }
+.conquista-mini.conquistada:hover { transform: translateY(-3px); }
+.conquista-mini.bloqueada { opacity: .38; filter: grayscale(1); }
+
+#achievement-stack { position: fixed; top: 18px; right: 18px; z-index: 2400; width: min(390px, calc(100vw - 36px)); display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+.achievement-popup { pointer-events: auto; display: grid; grid-template-columns: 48px 1fr auto; gap: 12px; align-items: center; padding: 13px; border: 1px solid rgba(251, 191, 36, .45); border-radius: 18px; color: var(--text); background: linear-gradient(135deg, rgba(30, 41, 59, .98), rgba(15, 23, 42, .98)); box-shadow: 0 18px 45px rgba(2, 8, 23, .38); transform: translateX(120%); opacity: 0; transition: transform .28s ease, opacity .28s ease; }
+.achievement-popup.is-visible { transform: translateX(0); opacity: 1; }
+.achievement-popup__icon { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 14px; font-size: 1.5rem; background: linear-gradient(135deg, #fbbf24, #f97316); }
+.achievement-popup small { display: block; margin-bottom: 3px; color: #fcd34d; font-size: .65rem; font-weight: 800; letter-spacing: .1em; }
+.achievement-popup strong { display: block; font-size: .98rem; }
+.achievement-popup p { margin-top: 3px; color: var(--muted); font-size: .8rem; line-height: 1.35; }
+.achievement-popup__close { width: 26px; height: 26px; padding: 0; border-radius: 50%; background: transparent; color: var(--muted); font-size: 1.25rem; line-height: 1; cursor: pointer; }
+.achievement-popup__close:hover { background: rgba(255,255,255,.1); color: var(--text); }
+
+/* ======================
    INPUTS / BUTTONS
 ====================== */
 input:not([type="radio"]),
@@ -826,6 +847,53 @@ button:hover {
   background: linear-gradient(90deg, var(--success), #16a34a);
   transition: width 0.8s ease;
 }
+
+/* ======================
+   CONCLUSÃO DE PROVA
+====================== */
+#final-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(2, 8, 23, 0.76);
+  backdrop-filter: blur(10px);
+}
+
+#final-screen.hidden { display: none; }
+
+.resultado-modal {
+  width: min(560px, 100%);
+  padding: 34px;
+  text-align: center;
+  border: 1px solid rgba(147, 197, 253, 0.28);
+  border-radius: 28px;
+  background: linear-gradient(145deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98));
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+}
+
+.resultado-icon {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 22px;
+  font-size: 2.1rem;
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.92), rgba(249, 115, 22, 0.92));
+  box-shadow: 0 14px 30px rgba(249, 115, 22, 0.25);
+}
+
+.resultado-modal h1 { margin-bottom: 8px; font-size: clamp(1.7rem, 5vw, 2.3rem); }
+.resultado-mensagem { color: var(--muted); line-height: 1.55; max-width: 420px; margin: 0 auto 24px; }
+.resultado-metricas { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.resultado-metricas > div { padding: 16px 12px; border: 1px solid var(--border); border-radius: 16px; background: rgba(255,255,255,0.05); }
+.resultado-metricas strong { display: block; color: #dbeafe; font-size: 1.35rem; margin-bottom: 4px; }
+.resultado-metricas span { color: var(--muted); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.resultado-acoes { margin-top: 24px; }
+.resultado-acoes button { min-width: 210px; }
 
 .duo-streak {
   margin-top: 20px;

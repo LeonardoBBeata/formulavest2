@@ -5,13 +5,38 @@ const multer = require('multer');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const ExcelJS = require('exceljs');
+const yauzl = require('yauzl');
 
 module.exports = function registerProvasRoutes(app, deps = {}) {
-  const { PDFDocument, auth, cache, chamarIA, db, extrairJSONSeguro } = deps;
+  const { PDFDocument, aiLimiter, auth, cache, chamarIA, db, extrairJSONSeguro } = deps;
 
 function gerarCodigoProva() {
   // Six bytes provide far more entropy than Math.random-derived room codes.
   return crypto.randomBytes(6).toString('base64url').slice(0, 8).toUpperCase();
+}
+
+async function registrarXpDeProva(usuarioId, xpGanho, queryable = db) {
+  const ganho = Math.max(0, Math.floor(Number(xpGanho) || 0));
+  const antes = await queryable.query('SELECT xp, nivel FROM usuarios WHERE id = $1', [usuarioId]);
+  const xpAnterior = Number(antes.rows[0]?.xp || 0);
+  const nivelAnterior = Number(antes.rows[0]?.nivel || 1);
+
+  const result = await queryable.query(`
+    UPDATE usuarios
+    SET xp = COALESCE(xp, 0) + $1,
+        nivel = GREATEST(1, FLOOR((COALESCE(xp, 0) + $1) / 100) + 1),
+        last_active = NOW()
+    WHERE id = $2
+    RETURNING xp, nivel
+  `, [ganho, usuarioId]);
+
+  return {
+    xp_ganho: ganho,
+    xp_total: Number(result.rows[0]?.xp || xpAnterior),
+    nivel: Number(result.rows[0]?.nivel || nivelAnterior),
+    nivel_anterior: nivelAnterior,
+    subiu_nivel: Number(result.rows[0]?.nivel || nivelAnterior) > nivelAnterior
+  };
 }
 
 function removerGabarito(questoes) {
@@ -39,7 +64,8 @@ async function extrairTextoDoArquivo(filePath) {
   if (ext === '.pdf') {
     const data = await fs.promises.readFile(filePath);
     try {
-      const parsed = await pdfParse(data);
+      if (!data.subarray(0, 5).equals(Buffer.from('%PDF-'))) throw new Error('Assinatura PDF inválida');
+      const parsed = await pdfParse(data, { max: 50 });
       return String(parsed.text || '').trim();
     } catch (err) {
       console.error('Erro ao ler PDF:', err.message || err);
@@ -49,6 +75,7 @@ async function extrairTextoDoArquivo(filePath) {
 
   if (ext === '.docx') {
     try {
+      await validarArquivoDocx(filePath);
       const result = await mammoth.extractRawText({ path: filePath });
       return String(result.value || '').trim();
     } catch (err) {
@@ -58,6 +85,43 @@ async function extrairTextoDoArquivo(filePath) {
   }
 
   throw new Error('Formato de arquivo nao suportado');
+}
+
+function validarArquivoDocx(filePath) {
+  return new Promise((resolve, reject) => {
+    yauzl.open(filePath, { lazyEntries: true, autoClose: true, validateEntrySizes: true }, (err, zipFile) => {
+      if (err) return reject(new Error('DOCX inválido'));
+      if (zipFile.entryCount > 1000) {
+        zipFile.close();
+        return reject(new Error('DOCX contém entradas demais'));
+      }
+
+      let expandedBytes = 0;
+      let settled = false;
+      const fail = (message) => {
+        if (settled) return;
+        settled = true;
+        zipFile.close();
+        reject(new Error(message));
+      };
+
+      zipFile.on('error', error => fail(error.message || 'DOCX inválido'));
+      zipFile.on('entry', entry => {
+        expandedBytes += entry.uncompressedSize;
+        const ratio = entry.uncompressedSize / Math.max(entry.compressedSize, 1);
+        if (entry.uncompressedSize > 20 * 1024 * 1024 || expandedBytes > 30 * 1024 * 1024 || ratio > 200) {
+          return fail('DOCX excede os limites de descompactação');
+        }
+        zipFile.readEntry();
+      });
+      zipFile.on('end', () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      });
+      zipFile.readEntry();
+    });
+  });
 }
 
 function criarUploadArquivo() {
@@ -78,7 +142,7 @@ function criarUploadArquivo() {
 
   return multer({
     storage,
-    limits: { fileSize: 10 * 1024 * 1024 },
+    limits: { fileSize: 5 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
       const allowedMimes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
       const safeName = path.basename(file.originalname || '');
@@ -203,10 +267,19 @@ async function carregarProvaProfessorDoProfessor(provaId, user) {
   return false;
 }
 
+function canAccessSchool(user, escolaId, empresaId) {
+  if (user.role === 'formulavest_master') return true;
+  if (!user.empresa_id || Number(user.empresa_id) !== Number(empresaId)) return false;
+  if (['diretor', 'coordenador', 'professor'].includes(user.role)) {
+    return Boolean(user.escola_id) && Number(user.escola_id) === Number(escolaId);
+  }
+  return user.role === 'empresa_admin';
+}
+
 // ======================
 // GERAR PROVÃO PAULISTA
 // ======================
-app.post('/gerar-provao', auth, async (req, res) => {
+app.post('/gerar-provao', auth, aiLimiter, async (req, res) => {
   try {
     const resposta =
       await chamarIA(`
@@ -265,7 +338,7 @@ RETORNE SOMENTE JSON:
       prova_id:
         provaId,
       questoes:
-        json.questoes
+        removerGabarito(json.questoes)
     });
 
   } catch (err) {
@@ -283,7 +356,7 @@ RETORNE SOMENTE JSON:
 // ======================
 // GERAR PROVA
 // ======================
-app.post("/gerar-prova", auth, async (req, res) => {
+app.post("/gerar-prova", auth, aiLimiter, async (req, res) => {
   try {
     const curso = String(req.body.curso || '').trim().slice(0, 200);
     const faculdade = String(req.body.faculdade || '').trim().slice(0, 200);
@@ -348,7 +421,7 @@ RETORNE SOMENTE JSON VÁLIDO:
 
     return res.json({
       prova_id: result.rows[0].id,
-      questoes: json.questoes
+      questoes: removerGabarito(json.questoes)
     });
 
   } catch (err) {
@@ -364,7 +437,7 @@ RETORNE SOMENTE JSON VÁLIDO:
   }
 });
 
-app.post('/professor/provas/gerar-questao-ia', auth, async (req, res) => {
+app.post('/professor/provas/gerar-questao-ia', auth, aiLimiter, async (req, res) => {
   try {
     if (!['professor','coordenador','diretor','empresa_admin','formulavest_master'].includes(req.user.role)) {
       return res.status(403).json({ error: 'Sem permissao' });
@@ -444,7 +517,12 @@ RETORNE SOMENTE JSON VALIDO:
   }
 });
 
-app.post('/professor/provas/importar', auth, criarUploadArquivo().single('arquivo'), async (req, res) => {
+app.post('/professor/provas/importar', auth, aiLimiter, (req, res, next) => {
+  if (!['professor', 'coordenador', 'diretor', 'empresa_admin', 'formulavest_master'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Sem permissao' });
+  }
+  next();
+}, criarUploadArquivo().single('arquivo'), async (req, res) => {
   let uploadedPath;
   try {
     if (!['professor','coordenador','diretor','empresa_admin','formulavest_master'].includes(req.user.role)) {
@@ -461,6 +539,9 @@ app.post('/professor/provas/importar', auth, criarUploadArquivo().single('arquiv
 
     if (!texto) {
       return res.status(500).json({ error: 'Nao foi possivel extrair texto do arquivo' });
+    }
+    if (texto.length > 40000) {
+      return res.status(413).json({ error: 'O documento contém texto demais para importar' });
     }
 
     const iaPrompt = `
@@ -544,7 +625,7 @@ ${texto.slice(0, 40000)}
   }
 });
 
-app.post("/gerar-simulado-materia", auth, async (req, res) => {
+app.post("/gerar-simulado-materia", auth, aiLimiter, async (req, res) => {
   try {
     const materia = String(req.body.materia || '').trim().slice(0, 150);
     const quantidade = Math.min(Math.max(Number(req.body.quantidade) || 10, 1), 30);
@@ -600,7 +681,7 @@ RETORNE SOMENTE JSON VALIDO:
 
     res.json({
       prova_id: result.rows[0].id,
-      questoes: json.questoes
+      questoes: removerGabarito(json.questoes)
     });
   } catch (err) {
     console.error(err);
@@ -611,7 +692,7 @@ RETORNE SOMENTE JSON VALIDO:
 // ======================
 // GERAR ENEM (90 questões)
 // ======================
-app.post('/gerar-enem', auth, async (req, res) => {
+app.post('/gerar-enem', auth, aiLimiter, async (req, res) => {
   try {
     let questoes = [];
     let tentativas = 0;
@@ -686,7 +767,7 @@ RETORNE SOMENTE JSON:
 
     res.json({
       prova_id: provaId,
-      questoes
+      questoes: removerGabarito(questoes)
     });
 
   } catch (err) {
@@ -706,79 +787,93 @@ app.post("/salvar-prova", auth, async (req, res) => {
   try {
     const { prova_id, questoes } = req.body;
 
-    if (!Array.isArray(questoes) || questoes.length === 0) {
+    if (!Array.isArray(questoes) || questoes.length === 0 || questoes.length > 100) {
       return res.status(400).json({ error: 'Questões inválidas' });
     }
 
-    const ativo = await db.query(`
-      SELECT *
-      FROM provas_ativas
-      WHERE id=$1 AND usuario_id=$2
-    `, [prova_id, req.user.id]);
-
-    const prova = ativo.rows[0];
-
-    if (!prova) {
-      return res.status(404).json({ error: "Prova não encontrada" });
-    }
-
-    if (prova.finalizada) {
-      return res.status(400).json({ error: "Prova já finalizada" });
-    }
-
-    const gabarito = Array.isArray(prova.questoes) ? prova.questoes : [];
-
+    const client = await db.connect();
     let acertos = 0;
+    let total = 0;
+    let percentual = 0;
+    let progresso;
+    try {
+      await client.query('BEGIN');
+      const ativo = await client.query(`
+        SELECT id, questoes, finalizada
+        FROM provas_ativas
+        WHERE id = $1 AND usuario_id = $2
+        FOR UPDATE
+      `, [prova_id, req.user.id]);
+      const prova = ativo.rows[0];
 
-    questoes.forEach((q, i) => {
-      const selecionada = String(q?.selecionada || '').toUpperCase();
-      const correta = String(gabarito[i]?.correta || '').toUpperCase();
-      if (selecionada && selecionada === correta) {
-        acertos++;
+      if (!prova) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Prova não encontrada' });
       }
-    });
+      if (prova.finalizada) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Prova já finalizada' });
+      }
 
-    const percentual = (acertos / questoes.length) * 100;
-    const xpGanho = Math.floor(percentual);
+      const gabarito = Array.isArray(prova.questoes) ? prova.questoes : [];
+      if (!gabarito.length || questoes.length !== gabarito.length) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Quantidade de respostas inválida' });
+      }
 
-    // XP + nível (1 query só)
-    await db.query(`
-      UPDATE usuarios
-      SET 
-        xp = xp + $1,
-        nivel = FLOOR((xp + $1) / 100) + 1
-      WHERE id = $2
-    `, [xpGanho, req.user.id]);
+      const respostasSalvas = [];
+      for (const [index, questao] of gabarito.entries()) {
+        const selecionada = String(questoes[index]?.selecionada || '').trim().toUpperCase();
+        if (selecionada && !['A', 'B', 'C', 'D', 'E'].includes(selecionada)) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Resposta inválida' });
+        }
+        if (selecionada && selecionada === String(questao.correta || '').toUpperCase()) acertos++;
+        respostasSalvas.push({
+          enunciado: questao.enunciado,
+          materia: questao.materia,
+          assunto: questao.assunto,
+          opcoes: questao.opcoes,
+          selecionada
+        });
+      }
 
-    await db.query(`
-      INSERT INTO provas(
-        usuario_id,
-        acertos,
-        total,
-        percentual,
-        questoes
-      )
-      VALUES ($1,$2,$3,$4,$5)
-    `, [
-      req.user.id,
-      acertos,
-      questoes.length,
-      percentual,
-      JSON.stringify(questoes)
-    ]);
+      total = gabarito.length;
+      percentual = (acertos / total) * 100;
+      const xpGanho = Math.floor(percentual);
+      await client.query(`
+        INSERT INTO provas(usuario_id, acertos, total, percentual, questoes)
+        VALUES ($1, $2, $3, $4, $5)
+      `, [req.user.id, acertos, total, percentual, JSON.stringify(respostasSalvas)]);
 
-    await db.query(`
-      UPDATE provas_ativas
-      SET finalizada = TRUE
-      WHERE id = $1
-    `, [prova_id]);
+      const finalizada = await client.query(`
+        UPDATE provas_ativas
+        SET finalizada = TRUE
+        WHERE id = $1 AND usuario_id = $2 AND finalizada = FALSE
+        RETURNING id
+      `, [prova_id, req.user.id]);
+      if (!finalizada.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Prova já finalizada' });
+      }
+
+      progresso = await registrarXpDeProva(req.user.id, xpGanho, client);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
 
     cache.del(`provas_${req.user.id}`);
 
     res.json({
       ok: true,
       acertos,
-      percentual
+      total,
+      percentual,
+      ...progresso
     });
 
   } catch (err) {
@@ -792,19 +887,20 @@ app.post("/salvar-prova", auth, async (req, res) => {
 // ======================
 app.get('/provas', auth, async (req, res) => {
   try {
-    const cacheKey = `provas_${req.user.id}`;
-    const cached = cache.get(cacheKey);
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
+    const offset = (page - 1) * limit;
 
-    if (cached) return res.json({ provas: cached });
-
+    const totalResult = await db.query('SELECT COUNT(*)::int AS total FROM provas WHERE usuario_id = $1', [req.user.id]);
     const result = await db.query(`
       SELECT * FROM provas
       WHERE usuario_id = $1
       ORDER BY id DESC
-    `, [req.user.id]);
+      LIMIT $2 OFFSET $3
+    `, [req.user.id, limit, offset]);
 
-    cache.set(cacheKey, result.rows);
-    res.json({ provas: result.rows });
+    const total = Number(totalResult.rows[0]?.total || 0);
+    res.json({ provas: result.rows, total, page, limit, has_more: offset + result.rows.length < total });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erro histórico' });
@@ -848,15 +944,29 @@ app.get("/dashboard", auth, async (req, res) => {
     `, [userId]);
 
     const provas = await db.query(`
-      SELECT acertos, total, percentual, criado_em
+      SELECT acertos, total, percentual, criado_em, 'simulado' AS tipo
       FROM provas
       WHERE usuario_id = $1
-      ORDER BY id ASC
+      UNION ALL
+      SELECT acertos, total, percentual, finalizada_em AS criado_em, 'prova_professor' AS tipo
+      FROM respostas_provas_professor
+      WHERE aluno_id = $1 AND finalizada = TRUE
+      ORDER BY criado_em ASC NULLS LAST
     `, [userId]);
+
+    const resumo = provas.rows.reduce((acc, prova) => {
+      acc.total_provas += 1;
+      acc.acertos += Number(prova.acertos || 0);
+      acc.questoes += Number(prova.total || 0);
+      acc.melhor_percentual = Math.max(acc.melhor_percentual, Number(prova.percentual || 0));
+      return acc;
+    }, { total_provas: 0, acertos: 0, questoes: 0, melhor_percentual: 0 });
+    resumo.percentual_geral = resumo.questoes ? (resumo.acertos / resumo.questoes) * 100 : 0;
 
     res.json({
       user: user.rows[0],
-      provas: provas.rows
+      provas: provas.rows,
+      resumo
     });
 
   } catch (err) {
@@ -910,6 +1020,10 @@ app.get("/grafico", auth, async (req, res) => {
 // ======================
 app.get("/ranking", auth, async (req, res) => {
   try {
+    if (req.user.role !== 'formulavest_master' && !req.user.empresa_id && !req.user.escola_id) {
+      return res.status(403).json({ error: 'Empresa ou escola obrigatoria' });
+    }
+
     let query = `
       SELECT username, xp, nivel, foto
       FROM usuarios
@@ -946,9 +1060,14 @@ app.get("/ranking", auth, async (req, res) => {
 // ======================
 // CORRIGIR REDAÇÃO
 // ======================
-app.post('/corrigir-redacao', auth, async (req, res) => {
+app.post('/corrigir-redacao', auth, aiLimiter, async (req, res) => {
   try {
-    const { tema, texto } = req.body;
+    const tema = String(req.body.tema || '').trim();
+    const texto = String(req.body.texto || '').trim();
+    if (!tema || !texto) return res.status(400).json({ error: 'Tema e texto são obrigatórios' });
+    if (tema.length > 300 || texto.length > 10000) {
+      return res.status(413).json({ error: 'Tema ou redação excede o limite permitido' });
+    }
 
 const prompt = `
 Corrija esta redação ENEM seguindo as 5 competências:
@@ -1035,6 +1154,13 @@ app.get(
         return res.status(403).json({ error: "Sem permissao" });
       }
 
+      if (req.user.role === 'empresa_admin' && !req.user.empresa_id) {
+        return res.status(403).json({ error: 'Empresa obrigatoria' });
+      }
+      if (['diretor', 'coordenador'].includes(req.user.role) && !req.user.escola_id) {
+        return res.status(403).json({ error: 'Escola obrigatoria' });
+      }
+
       const params = [];
       const conditions = [];
 
@@ -1044,7 +1170,7 @@ app.get(
       } else if (req.user.role === "empresa_admin") {
         conditions.push(`escola_id IN (SELECT id FROM escolas WHERE empresa_id = $${params.length + 1})`);
         params.push(req.user.empresa_id);
-      } else if (req.user.role !== "formulavest_master" && req.user.escola_id) {
+      } else if (['diretor', 'coordenador'].includes(req.user.role)) {
         conditions.push(`escola_id = $${params.length + 1}`);
         params.push(req.user.escola_id);
       }
@@ -1121,10 +1247,7 @@ app.post(
         return res.status(404).json({ error: "Sala nao encontrada" });
       }
 
-      if (
-        req.user.role !== "formulavest_master" &&
-        s.empresa_id !== req.user.empresa_id
-      ) {
+      if (!canAccessSchool(req.user, s.escola_id, s.empresa_id)) {
         return res.status(403).json({ error: "Sem permissao" });
       }
 
@@ -1867,15 +1990,20 @@ app.get('/professor/salas', auth, async (req, res) => {
 
 app.post('/professor/salas', auth, async (req, res) => {
   try {
+    if (!['professor', 'coordenador', 'diretor', 'empresa_admin', 'formulavest_master'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Sem permissao' });
+    }
+
     const { periodo_id, nome } = req.body;
     if (!periodo_id || !nome) return res.status(400).json({ error: 'Periodo e nome obrigatorios' });
 
     const periodo = await db.query('SELECT p.*, e.empresa_id FROM periodos p JOIN escolas e ON e.id = p.escola_id WHERE p.id=$1', [periodo_id]);
     const p = periodo.rows[0];
     if (!p) return res.status(404).json({ error: 'Periodo nao encontrado' });
-    if (req.user.role !== 'formulavest_master' && p.empresa_id !== req.user.empresa_id) return res.status(403).json({ error: 'Sem permissao' });
+    if (!canAccessSchool(req.user, p.escola_id, p.empresa_id)) return res.status(403).json({ error: 'Sem permissao' });
 
-    const ins = await db.query('INSERT INTO salas(periodo_id,nome) VALUES($1,$2) RETURNING *', [periodo_id, nome]);
+    const ins = await db.query('INSERT INTO salas(periodo_id,nome) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING *', [periodo_id, nome]);
+    if (!ins.rows.length) return res.status(409).json({ error: 'Sala ja existe' });
     res.json({ ok: true, sala: ins.rows[0] });
   } catch (err) {
     console.error(err);
@@ -1958,7 +2086,9 @@ app.post("/provas-prontas/:id/responder", auth, async (req, res) => {
       percentual
     ]);
 
-    res.json({ ok: true, acertos, total, percentual, respostas: respostasAtual });
+    // Não devolver acertos durante a prova: isso transformaria a rota parcial
+    // em um oráculo para descobrir o gabarito antes da finalização.
+    res.json({ ok: true, respostas: respostasAtual });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Erro salvar resposta" });
@@ -2044,7 +2174,7 @@ app.post("/provas-prontas/:id/finalizar", auth, async (req, res) => {
     const total = prova.questoes.length;
     const percentual = total ? (acertos / total) * 100 : 0;
 
-    await db.query(`
+    const salvamento = await db.query(`
       INSERT INTO respostas_provas_professor(
         prova_id,
         aluno_id,
@@ -2062,6 +2192,8 @@ app.post("/provas-prontas/:id/finalizar", auth, async (req, res) => {
         percentual = EXCLUDED.percentual,
         finalizada = TRUE,
         finalizada_em = NOW()
+      WHERE respostas_provas_professor.finalizada = FALSE
+      RETURNING id
     `, [
       prova.id,
       req.user.id,
@@ -2071,21 +2203,13 @@ app.post("/provas-prontas/:id/finalizar", auth, async (req, res) => {
       percentual
     ]);
 
-    // award XP to student: simple formula acertos * 10
-    try {
-      const xpEarned = Math.max(0, Number(acertos) * 10);
-      await db.query(`
-        UPDATE usuarios
-        SET xp = xp + $1,
-            nivel = FLOOR((xp + $1) / 100) + 1,
-            last_active = NOW()
-        WHERE id = $2
-      `, [xpEarned, req.user.id]);
-    } catch (e) {
-      console.error('Erro awarding XP', e);
+    if (salvamento.rows.length === 0) {
+      return res.status(400).json({ error: 'Voce ja finalizou esta prova' });
     }
 
-    res.json({ ok: true, acertos, total, percentual });
+    const progresso = await registrarXpDeProva(req.user.id, acertos * 10);
+
+    res.json({ ok: true, acertos, total, percentual, ...progresso });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Erro finalizar prova" });
@@ -2123,6 +2247,15 @@ app.get('/professor/export/periodo/:periodoId', auth, async (req, res) => {
       return res.status(403).json({ error: 'Sem permissao' });
     }
 
+    const periodScope = await db.query(
+      'SELECT p.escola_id, e.empresa_id FROM periodos p JOIN escolas e ON e.id = p.escola_id WHERE p.id = $1',
+      [periodoId]
+    );
+    if (!periodScope.rows[0]) return res.status(404).json({ error: 'Periodo nao encontrado' });
+    if (!canAccessSchool(req.user, periodScope.rows[0].escola_id, periodScope.rows[0].empresa_id)) {
+      return res.status(403).json({ error: 'Sem permissao' });
+    }
+
     const params = [periodoId];
     let professorFilter = '';
     if (req.user.role === 'professor') {
@@ -2136,6 +2269,7 @@ app.get('/professor/export/periodo/:periodoId', auth, async (req, res) => {
       JOIN provas_professor p ON p.id = r.prova_id
       JOIN salas s ON s.id = p.sala_id
       JOIN periodos per ON per.id = s.periodo_id
+      JOIN escolas e ON e.id = per.escola_id
       JOIN usuarios u ON u.id = r.aluno_id
       WHERE per.id = $1
       ${professorFilter}
@@ -2168,6 +2302,15 @@ app.get('/professor/export/sala/:salaId', auth, async (req, res) => {
       return res.status(403).json({ error: 'Sem permissao' });
     }
 
+    const roomScope = await db.query(
+      'SELECT p.escola_id, e.empresa_id FROM salas s JOIN periodos p ON p.id = s.periodo_id JOIN escolas e ON e.id = p.escola_id WHERE s.id = $1',
+      [salaId]
+    );
+    if (!roomScope.rows[0]) return res.status(404).json({ error: 'Sala nao encontrada' });
+    if (!canAccessSchool(req.user, roomScope.rows[0].escola_id, roomScope.rows[0].empresa_id)) {
+      return res.status(403).json({ error: 'Sem permissao' });
+    }
+
     const params = [salaId];
     let professorFilter = '';
     if (req.user.role === 'professor') {
@@ -2179,6 +2322,9 @@ app.get('/professor/export/sala/:salaId', auth, async (req, res) => {
       SELECT u.id, u.username, u.email, COUNT(r.id) AS provas_feitas, COALESCE(SUM(r.acertos),0) AS total_acertos, COALESCE(SUM(r.total),0) AS total_questoes, COALESCE(AVG(r.percentual),0) AS media_percentual, u.xp, u.nivel
       FROM respostas_provas_professor r
       JOIN provas_professor p ON p.id = r.prova_id
+      JOIN salas s ON s.id = p.sala_id
+      JOIN periodos per ON per.id = s.periodo_id
+      JOIN escolas e ON e.id = per.escola_id
       JOIN usuarios u ON u.id = r.aluno_id
       WHERE p.sala_id = $1
       ${professorFilter}

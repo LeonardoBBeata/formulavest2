@@ -12,7 +12,7 @@ const rateLimit = require('express-rate-limit');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const cookieParser = require('cookie-parser');
-//const helmet = require('helmet');
+const helmet = require('helmet');
 const PDFDocument = require('pdfkit');
 const validator = require('validator');
 
@@ -21,7 +21,7 @@ const { criarAdmMaster, db, initDB } = require('./config/database');
 const { auth, gerarToken, permitir } = require('./middlewares/auth');
 const logger = require('./utils/logger');
 const upload = require('./middlewares/upload');
-const { enviarEmail } = require('./services/email');
+const { enviarEmail, statusEmail } = require('./services/email');
 const { chamarIA, extrairJSONSeguro } = require('./services/ia');
 
 const registerHealthRoutes = require('./routes/health');
@@ -33,9 +33,46 @@ const registerProvasRoutes = require('./routes/provas');
 const app = express();
 const PORT = process.env.PORT || 3001;
 const isProd = process.env.NODE_ENV === 'production';
+let httpServer;
 
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", 'https://cdn.jsdelivr.net'],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'blob:'],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'", 'data:'],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        upgradeInsecureRequests: []
+      }
+    },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    crossOriginResourcePolicy: { policy: 'same-site' }
+  })
+);
+
+app.use((req, res, next) => {
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  if (isProd) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
+
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  res.on('finish', () => {
+    if (req.path.startsWith('/uploads/') || /\.(css|js|png|svg|ico)$/i.test(req.path)) return;
+    logger.info({ method: req.method, path: req.path, status: res.statusCode, duration_ms: Date.now() - startedAt }, 'request');
+  });
+  next();
+});
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -54,6 +91,15 @@ const authLimiter = rateLimit({
   }
 });
 
+const aiLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: Number(process.env.AI_MAX_REQUESTS_PER_HOUR) || 8,
+  keyGenerator: req => `user:${req.user.id}`,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Limite de solicitações de IA atingido. Tente novamente mais tarde.' }
+});
+
 const globalLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
   max: 300,
@@ -63,11 +109,6 @@ const globalLimiter = rateLimit({
     error: 'Muitas requisições. Tente novamente mais tarde.'
   }
 });
-
-// Configure Helmet with a relaxed CSP that allows the Chart.js CDN used in the frontend.
-//app.use(helmet({
-//  contentSecurityPolicy: false
-//}));
 
 app.use(compression());
 app.use(cookieParser());
@@ -120,6 +161,7 @@ app.use(
 
 const routeDeps = {
   PDFDocument,
+  aiLimiter,
   auth,
   bcrypt,
   cache,
@@ -127,6 +169,7 @@ const routeDeps = {
   crypto,
   db,
   enviarEmail,
+  statusEmail,
   extrairJSONSeguro,
   gerarToken,
   loginLimiter,
@@ -157,41 +200,65 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Erro interno no servidor' });
 });
 
+async function closeApp() {
+  try {
+    if (httpServer && httpServer.listening) {
+      await new Promise((resolve, reject) => {
+        httpServer.close(err => (err ? reject(err) : resolve()));
+      });
+    }
+  } catch (err) {
+    console.error('Erro ao encerrar servidor HTTP:', err);
+  }
+
+  try {
+    await db.end();
+  } catch (err) {
+    console.error('Erro ao encerrar conexões do banco:', err);
+  }
+}
+
+async function startServer(port = PORT) {
+  const dbReady = await initDB();
+  if (dbReady) {
+    await criarAdmMaster();
+  } else {
+    logger.warn('Servidor iniciando sem banco de dados. Algumas rotas podem ficar indisponíveis até o PostgreSQL voltar.');
+  }
+
+  if (httpServer && httpServer.listening) {
+    return httpServer;
+  }
+
+  return new Promise((resolve) => {
+    httpServer = app.listen(port, () => {
+      logger.info(`Servidor rodando na porta ${port}`);
+      resolve(httpServer);
+    });
+  });
+}
+
+const shutdown = async signal => {
+  console.log(`Encerrando servidor (${signal})...`);
+  try {
+    await closeApp();
+    console.log('Servidor e conexões do banco encerrados');
+  } catch (err) {
+    console.error('Erro ao encerrar aplicação:', err);
+  } finally {
+    process.exit(0);
+  }
+};
+
 // export app for testing
 module.exports = app;
+module.exports.app = app;
+module.exports.closeApp = closeApp;
+module.exports.startServer = startServer;
 
 if (require.main === module) {
-  initDB()
-    .then(async dbReady => {
-      if (dbReady) {
-        await criarAdmMaster();
-      } else {
-        logger.warn('Servidor iniciando sem banco de dados. Algumas rotas podem ficar indisponíveis até o PostgreSQL voltar.');
-      }
-
-      const server = app.listen(PORT, () => {
-        logger.info(`Servidor rodando na porta ${PORT}`);
-      });
-
-    const shutdown = async signal => {
-      console.log(`Encerrando servidor (${signal})...`);
-      server.close(async () => {
-        try {
-          await db.end();
-          console.log('Conexões do banco encerradas');
-        } catch (err) {
-          console.error('Erro ao encerrar conexões do banco:', err);
-        } finally {
-          process.exit(0);
-        }
-      });
-
-      setTimeout(() => {
-        console.error('Forçando encerramento do servidor');
-        process.exit(1);
-      }, 10000);
-    };
-
+  startServer()
+    .then(() => {
       process.on('SIGINT', () => shutdown('SIGINT'));
       process.on('SIGTERM', () => shutdown('SIGTERM'));
     })

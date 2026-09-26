@@ -13,13 +13,12 @@ from docx.shared import Inches, Pt, RGBColor
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "docs" / "Formulavest_Documentacao_TCC.docx"
 
-BLUE = RGBColor(46, 116, 181)
-DARK_BLUE = RGBColor(31, 77, 120)
 INK = RGBColor(15, 23, 42)
 MUTED = RGBColor(100, 116, 139)
-LIGHT_FILL = "F2F4F7"
-MID_FILL = "E8EEF5"
+LIGHT_FILL = "F3F4F6"
+MID_FILL = "E5E7EB"
 BORDER = "D7DBE2"
+HEADER_FILL = "1F2937"
 
 
 def set_run_font(run, name="Calibri", size=None, color=None, bold=None, italic=None):
@@ -129,8 +128,15 @@ def table(rows, widths, header=True):
             p = cell.paragraphs[0]
             p.paragraph_format.space_after = Pt(0)
             run = p.add_run(str(text))
-            set_run_font(run, size=9.5 if r_idx else 10, color=INK, bold=(header and r_idx == 0))
+            set_run_font(
+                run,
+                size=9.5 if r_idx else 10,
+                color=RGBColor(255, 255, 255) if header and r_idx == 0 else INK,
+                bold=(header and r_idx == 0),
+            )
             if header and r_idx == 0:
+                set_cell_shading(cell, HEADER_FILL)
+            elif r_idx % 2 == 0:
                 set_cell_shading(cell, LIGHT_FILL)
     doc.add_paragraph()
     return tbl
@@ -173,7 +179,7 @@ def heading(doc, text, level=1):
         set_run_font(
             run,
             size=16 if level == 1 else 13 if level == 2 else 12,
-            color=BLUE if level in (1, 2) else DARK_BLUE,
+            color=INK,
             bold=True,
         )
     return p
@@ -204,10 +210,18 @@ def configure_document(doc):
     normal.paragraph_format.space_after = Pt(6)
     normal.paragraph_format.line_spacing = 1.1
 
+    title_style = styles["Title"]
+    title_style.font.name = "Calibri"
+    title_style._element.rPr.rFonts.set(qn("w:ascii"), "Calibri")
+    title_style._element.rPr.rFonts.set(qn("w:hAnsi"), "Calibri")
+    title_style.font.size = Pt(22)
+    title_style.font.color.rgb = INK
+    title_style.font.bold = True
+
     for name, size, color in (
-        ("Heading 1", 16, BLUE),
-        ("Heading 2", 13, BLUE),
-        ("Heading 3", 12, DARK_BLUE),
+        ("Heading 1", 16, INK),
+        ("Heading 2", 13, INK),
+        ("Heading 3", 12, INK),
     ):
         st = styles[name]
         st.font.name = "Calibri"
@@ -220,24 +234,31 @@ def configure_document(doc):
     header = sec.header.paragraphs[0]
     header.text = ""
     header.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    run = header.add_run("FormulaVest - Documentacao Tecnica")
+    run = header.add_run("FormulaVest | Documento técnico do projeto")
     set_run_font(run, size=9, color=MUTED)
 
     footer = sec.footer.paragraphs[0]
     footer.text = ""
     footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = footer.add_run("Projeto academico e tecnico - FormulaVest")
+    run = footer.add_run("FormulaVest | Documentação técnica e operacional")
     set_run_font(run, size=9, color=MUTED)
+
+    props = doc.core_properties
+    props.title = "FormulaVest — Documentação Técnica e Operacional"
+    props.subject = "Arquitetura, operação e requisitos da plataforma FormulaVest"
+    props.author = "Equipe FormulaVest"
+    props.keywords = "educação, simulados, provas online, Node.js, PostgreSQL"
 
 
 def cover(doc):
     add_para(doc, "FORMULAVEST", bold=True, size=14, color=INK, align=WD_ALIGN_PARAGRAPH.CENTER, after=18)
     add_para(
         doc,
-        "DOCUMENTACAO COMPLETA DO PROJETO",
+        "DOCUMENTAÇÃO TÉCNICA E OPERACIONAL",
+        style="Title",
         bold=True,
         size=22,
-        color=BLUE,
+        color=INK,
         align=WD_ALIGN_PARAGRAPH.CENTER,
         after=8,
     )
@@ -245,7 +266,7 @@ def cover(doc):
         doc,
         "Plataforma Web de Estudos, Simulados, Provas ao Vivo e Gestao Escolar",
         size=14,
-        color=DARK_BLUE,
+        color=MUTED,
         align=WD_ALIGN_PARAGRAPH.CENTER,
         after=28,
     )
@@ -269,21 +290,14 @@ def cover(doc):
     page_break(doc)
 
 
-def add_callout(doc, title, body):
-    tbl = doc.add_table(rows=1, cols=1)
-    set_table_width(tbl, [9360])
-    set_table_borders(tbl, color="B7C7DA")
-    cell = tbl.rows[0].cells[0]
-    set_cell_shading(cell, "F4F6F9")
-    p = cell.paragraphs[0]
-    p.paragraph_format.space_after = Pt(3)
-    r = p.add_run(title)
-    set_run_font(r, size=11, bold=True, color=DARK_BLUE)
-    p2 = cell.add_paragraph()
-    p2.paragraph_format.space_after = Pt(0)
-    r2 = p2.add_run(body)
-    set_run_font(r2, size=10.5, color=INK)
-    doc.add_paragraph()
+def add_note(doc, title, body):
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(8)
+    p.paragraph_format.line_spacing = 1.1
+    lead = p.add_run(f"{title}. ")
+    set_run_font(lead, size=11, color=INK, bold=True)
+    text = p.add_run(body)
+    set_run_font(text, size=11, color=INK)
 
 
 def build_doc():
@@ -301,9 +315,8 @@ def build_doc():
     )
     add_para(
         doc,
-        "A documentacao descreve os objetivos do projeto, sua arquitetura, modelo de dados, fluxos de usuario, requisitos funcionais e nao funcionais, "
-        "estrategias de seguranca, rotas principais, procedimentos de implantacao e pontos de manutencao. Tambem registra correcoes recentes realizadas "
-        "para estabilizar a geracao de provas e a prova ao vivo.",
+        "A documentação descreve objetivos, requisitos, arquitetura, dados, fluxos de usuário, segurança, testes, operação e manutenção. "
+        "Também estabelece critérios de qualidade e rastreabilidade para que a solução possa ser apresentada, implantada e evoluída de forma segura.",
     )
     heading(doc, "Palavras-chave", 2)
     add_para(doc, "Educacao; simulados; Node.js; PostgreSQL; provas online; gamificacao; FormulaVest.")
@@ -319,11 +332,12 @@ def build_doc():
         "6. Modelo de dados",
         "7. Funcionalidades por perfil",
         "8. Fluxos principais",
-        "9. Seguranca, privacidade e integridade",
-        "10. Testes e validacao",
-        "11. Implantacao e operacao",
-        "12. Manutencao evolutiva",
-        "13. Conclusao",
+        "9. Segurança, privacidade e integridade",
+        "10. Requisitos e regras de negócio",
+        "11. Testes e validação",
+        "12. Implantação e operação",
+        "13. Manutenção evolutiva",
+        "14. Conclusão",
         "Apendices",
     ]:
         add_para(doc, item, after=3)
@@ -365,10 +379,10 @@ def build_doc():
         "Ferramentas educacionais eficientes precisam combinar usabilidade, rastreabilidade e rapidez. Em ambientes escolares, a aplicacao de provas digitais deve ser simples para o professor e objetiva para o aluno. "
         "O FormulaVest atende a esse cenario ao fornecer telas especializadas, dashboards e uma camada administrativa capaz de refletir a estrutura real da instituicao.",
     )
-    add_callout(
+    add_note(
         doc,
         "Contribuicao do projeto",
-        "A principal contribuicao e integrar estudo individual, prova ao vivo e gestao escolar em uma mesma base de dados, reduzindo retrabalho e viabilizando analises posteriores de desempenho.",
+        "A principal contribuição é integrar estudo individual, prova ao vivo e gestão escolar em uma mesma base de dados, reduzindo retrabalho e viabilizando análises posteriores de desempenho.",
     )
 
     heading(doc, "4. Metodologia e tecnologias", 1)
@@ -404,7 +418,7 @@ def build_doc():
         ("routes/user.js", "Perfil, XP, conquistas, upload de foto e dados do usuario logado."),
         ("public/", "Telas e scripts do aluno, professor, admin, login, perfil e PWA."),
     ], [2600, 6760])
-    add_callout(
+    add_note(
         doc,
         "Fluxo macro",
         "Navegador -> arquivos public/ -> fetch para rotas Express -> validacao JWT -> regras de permissao -> consultas PostgreSQL -> resposta JSON ou arquivo exportado.",
@@ -451,6 +465,29 @@ def build_doc():
         ("Master", "Gerenciar empresas, admins e visao global da plataforma."),
     ], [1900, 7460])
 
+    heading(doc, "7.1 Experiência do aluno e indicadores", 2)
+    add_para(
+        doc,
+        "Após concluir uma prova, o aluno recebe uma tela de resultado com nota, total de acertos, percentual, tempo empregado, XP recebido e evolução de nível. "
+        "O painel de estatísticas consolida histórico de tentativas, gráfico de desempenho e comparação por matéria. Esses elementos transformam a correção em uma devolutiva pedagógica clara, e não apenas em uma nota isolada.",
+    )
+    table([
+        ("Indicador", "Uso pedagógico"),
+        ("Acertos e percentual", "Permite identificar domínio global da prova."),
+        ("Desempenho por matéria", "Orienta revisão focada em áreas com menor aproveitamento."),
+        ("XP e nível", "Dá retorno imediato de progresso e incentiva recorrência."),
+        ("Ranking", "Cria comparação opcional e motivação em contexto de turma."),
+        ("Conquistas", "Reconhece marcos como primeira prova, sequência e evolução de nível."),
+    ], [2800, 6560])
+    heading(doc, "7.2 Conquistas implementadas", 2)
+    add_bullets(doc, [
+        "Primeira prova, três provas, dez provas e cinquenta provas concluídas.",
+        "Prova perfeita, para aproveitamento total em uma tentativa finalizada.",
+        "Marcos de XP e de nível, incluindo os patamares cinco e dez.",
+        "Sequências de estudo de três e sete dias, calculadas a partir de tentativas finalizadas.",
+        "Notificação não intrusiva no canto superior direito quando uma nova conquista é registrada.",
+    ])
+
     heading(doc, "8. Fluxos principais", 1)
     heading(doc, "8.1 Geracao de simulado individual", 2)
     add_numbered(doc, [
@@ -487,13 +524,45 @@ def build_doc():
         "Uploads de prova aceitam apenas PDF e DOCX com limite de tamanho.",
         "Alunos banidos sao bloqueados no login.",
     ])
-    add_callout(
+    add_note(
         doc,
         "Ponto de atencao",
-        "A seguranca depende de JWT_SECRET forte, MASTER_PASSWORD seguro, uso de HTTPS em producao e controle adequado das variaveis .env.",
+        "A segurança depende de JWT_SECRET forte, MASTER_PASSWORD seguro, uso de HTTPS em produção e controle adequado das variáveis .env.",
     )
 
-    heading(doc, "10. Testes e validacao", 1)
+    heading(doc, "10. Requisitos e regras de negócio", 1)
+    heading(doc, "10.1 Requisitos funcionais", 2)
+    table([
+        ("ID", "Requisito", "Critério de aceite"),
+        ("RF01", "Cadastrar e autenticar usuários", "Conta é criada, verificada e recebe sessão válida."),
+        ("RF02", "Gerar simulados", "Questões são apresentadas e a tentativa fica associada ao aluno."),
+        ("RF03", "Finalizar e corrigir prova", "Resultado, acertos, XP, nível e histórico são persistidos."),
+        ("RF04", "Aplicar prova ao vivo", "Código, horário, sala e limite de participantes são validados."),
+        ("RF05", "Administrar estrutura", "Perfis autorizados gerenciam empresa, escola, período e sala."),
+        ("RF06", "Produzir relatórios", "Professor exporta dados de suas provas e turmas em PDF ou XLSX."),
+        ("RF07", "Gamificar progresso", "Conquistas únicas são registradas e notificadas no cliente."),
+    ], [900, 3600, 4860])
+    heading(doc, "10.2 Requisitos não funcionais", 2)
+    table([
+        ("Categoria", "Diretriz adotada"),
+        ("Segurança", "Autorização por papel, JWT, bcrypt, rate limit, CORS e validação de entrada."),
+        ("Usabilidade", "Telas distintas por perfil, feedback de carregamento e estados de erro compreensíveis."),
+        ("Confiabilidade", "Registro transacional de resultados, validação de prova ativa e tratamento centralizado de erros."),
+        ("Desempenho", "Compressão HTTP, cache control para estáticos, cache de aplicação e consultas segmentadas."),
+        ("Compatibilidade", "Aplicação web responsiva e PWA com service worker para ativos seguros."),
+        ("Manutenibilidade", "Rotas organizadas por domínio, configuração por ambiente e scripts de banco versionáveis."),
+    ], [2500, 6860])
+    heading(doc, "10.3 Regras de negócio críticas", 2)
+    add_bullets(doc, [
+        "Uma prova de professor só pode receber respostas enquanto estiver ativa e dentro de sua janela de aplicação.",
+        "O aluno só pode ingressar se pertencer à sala permitida e houver capacidade disponível.",
+        "A pontuação de uma tentativa finalizada não deve ser recalculada a partir de respostas parciais.",
+        "A conquista é identificada por chave e só pode ser concedida uma vez para cada usuário.",
+        "Operações administrativas respeitam o escopo do papel e da organização vinculada ao usuário autenticado.",
+        "Credenciais e tokens não são conteúdos de interface nem devem ser inseridos no repositório ou em documentos públicos.",
+    ])
+
+    heading(doc, "11. Testes e validação", 1)
     add_para(
         doc,
         "Foram executadas verificacoes de sintaxe nos arquivos JavaScript principais e uma varredura em todos os arquivos JS fora de node_modules. "
@@ -510,28 +579,28 @@ def build_doc():
         ("npm.cmd test -- --runInBand", "1 suite / 1 teste aprovado"),
     ], [3400, 5960])
 
-    heading(doc, "10.1 Correcoes realizadas nesta revisao", 2)
+    heading(doc, "11.1 Correções e estabilizações relevantes", 2)
     add_bullets(doc, [
-        "Geracao de ENEM e Provao recebeu estado de carregamento, tratamento de erro e validacao de questoes antes de renderizar.",
-        "Renderizacao das alternativas passou a usar botoes com classe .alternativa, evitando comportamento visual inconsistente.",
-        "Fluxo de prova ao vivo foi corrigido para separar resposta parcial de resposta finalizada.",
-        "Tabela respostas_provas_professor recebeu coluna finalizada, tambem registrada em migration SQL.",
-        "Schema inicial passou a criar max_alunos e provas_professor_participantes, estruturas usadas pelo fluxo ao vivo.",
-        "Service worker teve erro de sintaxe corrigido e cache atualizado para v2.",
+        "A renderização das questões usa escape de HTML e validação antes da montagem das alternativas, evitando falhas de referência e conteúdo inseguro.",
+        "O fluxo de simulados persiste a prova ativa antes da exibição e apresenta uma tela de conclusão com desempenho da tentativa.",
+        "A prova ao vivo separa salvamento parcial de finalização definitiva, preservando placar e correção coerentes.",
+        "A tabela respostas_provas_professor registra a coluna finalizada, e o schema cria participantes e limite de alunos para a prova ao vivo.",
+        "O service worker foi revisado para não interceptar áreas autenticadas e evitar cache indevido de respostas administrativas.",
+        "Conquistas possuem histórico único por usuário e notificação visual no canto superior direito após novos marcos.",
     ])
 
-    heading(doc, "11. Implantacao e operacao", 1)
+    heading(doc, "12. Implantação e operação", 1)
     add_para(
         doc,
         "O projeto pode ser executado localmente com PostgreSQL via Docker Compose ou implantado em ambiente Node.js 20 com PostgreSQL externo. "
-        "O arquivo .env.example descreve variaveis essenciais como DATABASE_URL, JWT_SECRET, MASTER_PASSWORD, credenciais de email e OpenRouter.",
+        "A configuração é orientada por variáveis de ambiente; segredos não devem ser incluídos em arquivos rastreados, capturas de tela ou documentação compartilhada.",
     )
     add_numbered(doc, [
-        "Copiar .env.example para .env.",
-        "Subir o PostgreSQL com docker compose up -d postgres.",
-        "Instalar dependencias com npm install ou npm ci.",
-        "Executar migrations com npm run db:migrate quando necessario.",
-        "Iniciar em desenvolvimento com npm run dev ou em producao com npm start.",
+        "Copiar .env.example para .env e preencher apenas no ambiente local ou no cofre de segredos do provedor.",
+        "Subir o PostgreSQL com docker compose up -d postgres ou configurar DATABASE_URL para a instância gerenciada.",
+        "Instalar dependências com npm ci em ambientes reproduzíveis ou npm install no desenvolvimento inicial.",
+        "Executar migrations com npm run db:migrate antes de liberar uma versão que altere o schema.",
+        "Executar npm test e a checagem de sintaxe antes do deploy; iniciar com npm start em produção.",
     ])
     table([
         ("Variavel", "Descricao"),
@@ -539,11 +608,20 @@ def build_doc():
         ("DATABASE_SSL", "Ativa SSL quando necessario em producao."),
         ("JWT_SECRET", "Chave de assinatura dos tokens."),
         ("MASTER_PASSWORD", "Senha inicial do usuario master."),
-        ("OUTLOOK_EMAIL / OUTLOOK_APP_PASSWORD", "Envio de emails transacionais."),
+        ("OUTLOOK_EMAIL / OUTLOOK_APP_PASSWORD", "Credenciais do provedor SMTP; usar apenas se SMTP AUTH estiver habilitado para a caixa."),
         ("OPENROUTER_API_KEY / MODEL / URL", "Geracao e correcao por IA."),
     ], [2800, 6560])
 
-    heading(doc, "12. Manutencao evolutiva", 1)
+    heading(doc, "12.1 Checklist de liberação", 2)
+    add_bullets(doc, [
+        "Confirmar que DATABASE_URL, JWT_SECRET, APP_URL e variáveis de IA/e-mail estão disponíveis no ambiente de destino.",
+        "Executar as migrations e verificar /health/db antes de disponibilizar o acesso público.",
+        "Verificar login de aluno, professor e administrador em janela anônima para não confundir sessão com cache local.",
+        "Publicar nova versão do service worker quando houver mudança nos ativos e validar que ele não armazena respostas de APIs autenticadas.",
+        "Caso o Outlook bloqueie SMTP AUTH, optar por OAuth2/Microsoft Graph ou habilitar o método na caixa corporativa, sem reutilizar senhas pessoais.",
+    ])
+
+    heading(doc, "13. Manutenção evolutiva", 1)
     add_para(
         doc,
         "A manutencao deve priorizar migracoes consistentes, testes automatizados para rotas criticas e melhoria gradual da experiencia visual. "
@@ -558,7 +636,7 @@ def build_doc():
         "Adicionar pagina de status para IA/email e tratamentos de fallback.",
     ])
 
-    heading(doc, "13. Conclusao", 1)
+    heading(doc, "14. Conclusão", 1)
     add_para(
         doc,
         "O FormulaVest apresenta uma base funcional para uma plataforma educacional completa, com recursos de estudo individual, prova ao vivo e gestao institucional. "
@@ -566,8 +644,8 @@ def build_doc():
     )
     add_para(
         doc,
-        "A revisao tecnica corrigiu pontos que afetavam diretamente a experiencia do aluno e do professor, especialmente a exibicao de provas geradas e a finalizacao da prova ao vivo. "
-        "Com a documentacao e as migracoes atualizadas, o projeto fica mais preparado para evolucao, testes e apresentacao academica.",
+        "A revisão técnica corrigiu pontos que afetavam diretamente a experiência do aluno e do professor, especialmente a exibição de provas geradas, a conclusão de tentativas, a persistência de conquistas e a navegação autenticada. "
+        "Com a documentação, as migrações e os controles operacionais atualizados, o projeto fica mais preparado para evolução, testes e apresentação acadêmica.",
     )
 
     page_break(doc)

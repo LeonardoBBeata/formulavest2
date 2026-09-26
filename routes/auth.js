@@ -1,8 +1,10 @@
 module.exports = function registerAuthRoutes(app, deps = {}) {
-  const { bcrypt, crypto, db, enviarEmail, gerarToken, loginLimiter, validator } = deps;
+  const { authLimiter, bcrypt, crypto, db, enviarEmail, gerarToken, loginLimiter, validator } = deps;
+  const exposeTestCodes = process.env.NODE_ENV !== 'production' && process.env.EXPOSE_TEST_CODES === 'true';
 
   // Persist only a hash, so a database disclosure does not reveal live sessions.
   const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
+  const hashCode = (code) => crypto.createHash('sha256').update(String(code)).digest('hex');
 
   // Helper: create a refresh token record
   async function createRefreshToken(userId) {
@@ -23,6 +25,37 @@ module.exports = function registerAuthRoutes(app, deps = {}) {
   async function revokeRefreshToken(token) {
     if (!token) return;
     await db.query(`DELETE FROM refresh_tokens WHERE token=$1`, [hashToken(token)]);
+  }
+
+  function accessCookieOptions() {
+    return {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    };
+  }
+
+  async function enviarCodigo(user, assunto, texto) {
+    const codigo = crypto.randomInt(100000, 1000000).toString();
+    await db.query(`
+      UPDATE usuarios
+      SET codigo_verificacao = $1,
+          codigo_verificacao_expira = NOW() + INTERVAL '10 minutes'
+      WHERE id = $2
+    `, [hashCode(codigo), user.id]);
+
+    const entrega = await enviarEmail(user.email, assunto, texto(codigo));
+    if (!entrega?.ok) {
+      await db.query(`
+        UPDATE usuarios
+        SET codigo_verificacao = NULL, codigo_verificacao_expira = NULL
+        WHERE id = $1
+      `, [user.id]);
+      return { ok: false, reason: entrega?.reason || 'provider' };
+    }
+    return { ok: true, devCodigo: exposeTestCodes ? codigo : undefined };
   }
 
 app.post('/register', async (req, res) => {
@@ -71,11 +104,7 @@ app.post('/register', async (req, res) => {
         // gerar hash da senha
         const hash = await bcrypt.hash(senha, 10);
 
-        // gerar código de verificação
-        const codigo = crypto.randomInt(100000, 1000000).toString();
-
-        // salvar usuário no banco
-        await db.query(
+        const criado = await db.query(
             `
 INSERT INTO usuarios (
   username,
@@ -86,37 +115,32 @@ INSERT INTO usuarios (
   verificado
 )
 VALUES ($1,$2,$3,$4,NOW() + INTERVAL '10 minutes',FALSE)
+RETURNING id, email
             `,
             [
                 username,
                 email,
-                hash,
-                codigo
+            hash,
+            null
             ]
         );
 
-        console.log('Tentando enviar email para:', email);
-
-        const emailResult = await enviarEmail(
-            email,
+        const emailResult = await enviarCodigo(
+            criado.rows[0],
             'Código de verificação - FórmulaVest',
-            `Seu código de verificação é: ${codigo}`
+            codigo => `Seu código de verificação é: ${codigo}`
         );
 
-        if (!emailResult?.ok) {
-            console.warn('Falha ao enviar email de verificação; cadastro segue com sucesso.', emailResult?.reason);
+        if (!emailResult.ok) {
+            await db.query('DELETE FROM usuarios WHERE id = $1 AND verificado = FALSE', [criado.rows[0].id]);
+            return res.status(503).json({ error: 'Não foi possível enviar o código. Verifique o serviço de e-mail e tente novamente.' });
         }
 
         return res.json({
             ok: true,
-            message: emailResult?.ok
-                ? 'Codigo enviado para seu email'
-                : 'Cadastro realizado, mas não foi possível enviar o e-mail de verificação no momento.',
-            email_enviado: Boolean(emailResult?.ok),
-            dev_codigo:
-                process.env.NODE_ENV === 'production'
-                    ? undefined
-                    : codigo
+            message: 'Código enviado para seu e-mail',
+            email_enviado: true,
+            dev_codigo: emailResult.devCodigo
         });
 
     } catch (err) {
@@ -126,6 +150,22 @@ VALUES ($1,$2,$3,$4,NOW() + INTERVAL '10 minutes',FALSE)
             error: 'Erro interno no registro'
         });
     }
+});
+
+app.post('/reenviar-verificacao', authLimiter, async (req, res) => {
+  try {
+    const email = String(req.body.email || '').toLowerCase().trim();
+    const userResult = await db.query('SELECT id, email, verificado FROM usuarios WHERE email = $1', [email]);
+    const user = userResult.rows[0];
+    if (!user || user.verificado) return res.json({ ok: true, message: 'Se necessário, um novo código será enviado.' });
+
+    const delivery = await enviarCodigo(user, 'Código de verificação - FórmulaVest', codigo => `Seu código de verificação é: ${codigo}`);
+    if (!delivery.ok) return res.status(503).json({ error: 'Não foi possível enviar o código agora. Tente novamente mais tarde.' });
+    return res.json({ ok: true, message: 'Novo código enviado.', dev_codigo: delivery.devCodigo });
+  } catch (err) {
+    console.error('Erro ao reenviar verificação:', err);
+    return res.status(500).json({ error: 'Erro ao reenviar código' });
+  }
 });
 
 // ======================
@@ -168,7 +208,7 @@ app.post('/verificar-email', async (req, res) => {
             });
         }
 
-        if (!codigo || user.codigo_verificacao !== String(codigo) || !user.codigo_verificacao_expira || new Date(user.codigo_verificacao_expira) <= new Date()) {
+        if (!codigo || user.codigo_verificacao !== hashCode(codigo) || !user.codigo_verificacao_expira || new Date(user.codigo_verificacao_expira) <= new Date()) {
             return res.status(400).json({
                 error:
                     'Código inválido'
@@ -251,31 +291,12 @@ app.post(
         });
       }
 
-      const codigo = crypto.randomInt(100000, 1000000).toString();
+      const delivery = await enviarCodigo(user, 'Código de login - FórmulaVest', codigo => `Seu código é: ${codigo}`);
+      if (!delivery.ok) {
+        return res.status(503).json({ error: 'Não foi possível enviar o código de login. Tente novamente mais tarde.' });
+      }
 
-      await db.query(`
-        UPDATE usuarios
-        SET codigo_verificacao=$1,
-            codigo_verificacao_expira=NOW() + INTERVAL '10 minutes'
-        WHERE id=$2
-      `, [
-        codigo,
-        user.id
-      ]);
-
-      await enviarEmail(
-        user.email,
-        "Código de login - FórmulaVest",
-        `Seu código é: ${codigo}`
-      );
-
-      res.json({
-        ok: true,
-        dev_codigo:
-          process.env.NODE_ENV === "production"
-            ? undefined
-            : codigo
-      });
+      res.json({ ok: true, dev_codigo: delivery.devCodigo });
 
     } catch (err) {
       console.error(err);
@@ -331,17 +352,27 @@ app.post(
         return res.status(403).json({ error: 'Verifique seu email primeiro' });
       }
 
-      if (!codigo || user.codigo_verificacao !== String(codigo) || !user.codigo_verificacao_expira || new Date(user.codigo_verificacao_expira) <= new Date()) {
+      if (!codigo) {
         return res.status(400).json({ error: "Código inválido" });
       }
-      await db.query(`UPDATE usuarios SET codigo_verificacao=NULL, codigo_verificacao_expira=NULL WHERE id=$1`, [user.id]);
 
-      const token =
-        gerarToken(user);
+      const consumedCode = await db.query(`
+        UPDATE usuarios
+        SET codigo_verificacao = NULL, codigo_verificacao_expira = NULL
+        WHERE id = $1
+          AND codigo_verificacao = $2
+          AND codigo_verificacao_expira > NOW()
+        RETURNING id, username, role, empresa_id, escola_id, sala_id, token_version
+      `, [user.id, hashCode(codigo)]);
+      const authenticatedUser = consumedCode.rows[0];
+      if (!authenticatedUser) return res.status(400).json({ error: 'Código inválido' });
+
+      const token = gerarToken(authenticatedUser);
+      res.cookie('accessToken', token, accessCookieOptions());
 
       // create refresh token and set httpOnly cookie
       try {
-        const { token: refreshToken } = await createRefreshToken(user.id);
+        const { token: refreshToken } = await createRefreshToken(authenticatedUser.id);
         const cookieOptions = {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
@@ -356,11 +387,10 @@ app.post(
 
       res.json({
         ok: true,
-        token,
-        role: user.role,
-        empresa_id: user.empresa_id,
-        escola_id: user.escola_id,
-        sala_id: user.sala_id
+        role: authenticatedUser.role,
+        empresa_id: authenticatedUser.empresa_id,
+        escola_id: authenticatedUser.escola_id,
+        sala_id: authenticatedUser.sala_id
       });
 
     } catch (err) {
@@ -488,18 +518,31 @@ app.post(
           10
         );
 
-      await db.query(`
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        const consumed = await client.query(`
         UPDATE usuarios
         SET
           senha=$1,
           reset_token=NULL,
-          reset_expira=NULL
-        WHERE id=$2
-      `, [
-        hash,
-        user.id
-      ]);
-      await db.query('DELETE FROM refresh_tokens WHERE user_id = $1', [user.id]);
+          reset_expira=NULL,
+          token_version = COALESCE(token_version, 0) + 1
+        WHERE id=$2 AND reset_token=$3 AND reset_expira > NOW()
+        RETURNING id
+      `, [hash, user.id, hashToken(token)]);
+        if (!consumed.rows.length) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Token inválido ou expirado' });
+        }
+        await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [user.id]);
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
 
       res.json({
         ok: true,
@@ -541,7 +584,13 @@ app.post('/token/refresh', async (req, res) => {
     if (!user) return res.status(401).json({ error: 'Usuário inválido' });
 
     // rotate refresh token
-    const { token: newRefresh } = await rotateRefreshToken(token);
+    const rotated = await rotateRefreshToken(token);
+    if (!rotated) {
+      res.clearCookie('refreshToken', { path: '/' });
+      res.clearCookie('accessToken', { path: '/' });
+      return res.status(401).json({ error: 'Refresh token já utilizado ou inválido' });
+    }
+    const { token: newRefresh } = rotated;
     const cookieOptions = {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -551,8 +600,8 @@ app.post('/token/refresh', async (req, res) => {
     };
     res.cookie('refreshToken', newRefresh, cookieOptions);
 
-    const access = gerarToken(user);
-    res.json({ ok: true, token: access, role: user.role, empresa_id: user.empresa_id, escola_id: user.escola_id, sala_id: user.sala_id });
+    res.cookie('accessToken', gerarToken(user), accessCookieOptions());
+    res.json({ ok: true, role: user.role, empresa_id: user.empresa_id, escola_id: user.escola_id, sala_id: user.sala_id });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erro refresh token' });
@@ -562,8 +611,32 @@ app.post('/token/refresh', async (req, res) => {
 app.post('/logout', async (req, res) => {
   try {
     const token = req.cookies?.refreshToken;
-    if (token) await revokeRefreshToken(token);
-    res.clearCookie('refreshToken', { path: '/' });
+    if (token) {
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        const revoked = await client.query(
+          'DELETE FROM refresh_tokens WHERE token = $1 RETURNING user_id',
+          [hashToken(token)]
+        );
+        if (revoked.rows[0]) {
+          await client.query(
+            'UPDATE usuarios SET token_version = COALESCE(token_version, 0) + 1 WHERE id = $1',
+            [revoked.rows[0].user_id]
+          );
+          await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [revoked.rows[0].user_id]);
+        }
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+    const cookieOptions = { path: '/', secure: process.env.NODE_ENV === 'production', sameSite: 'lax' };
+    res.clearCookie('refreshToken', cookieOptions);
+    res.clearCookie('accessToken', cookieOptions);
     res.json({ ok: true });
   } catch (err) {
     console.error(err);

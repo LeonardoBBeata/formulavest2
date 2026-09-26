@@ -32,7 +32,7 @@ jobs:
         run: npm ci
 
       - name: Lint
-        run: node --check server.js || true
+        run: npm run lint
 
       - name: Run migrations
         env:
@@ -40,4 +40,10 @@ jobs:
         run: npm run db:migrate
 
       - name: Run tests
-        run: echo "No tests configured yet"
+        env:
+          JWT_SECRET: ci-only-secret-not-for-production
+          DATABASE_SSL: "false"
+          EMAIL_PROVIDER: console
+          EXPOSE_TEST_CODES: "true"
+          RUN_DB_TESTS: "true"
+        run: npm test

@@ -1,5 +1,5 @@
 const API = window.location.origin;
-const token = localStorage.getItem('token');
+const token = null;
 let provaSalva = null;
 
 try {
@@ -8,7 +8,7 @@ try {
   provaSalva = null;
 }
 
-if (!token || !provaSalva) {
+if (localStorage.getItem('auth_session') !== '1' || !provaSalva) {
   window.location.href = '/prova-codigo.html';
 }
 
@@ -173,23 +173,83 @@ async function finalizar() {
     const texto = el('progresso-texto');
     if (texto) texto.textContent = 'Prova finalizada';
 
-    if (container) {
-      container.innerHTML = `
-        <div class="questao-card responder-questao-card resultado-final" style="text-align:center;">
-          <h4>Prova finalizada!</h4>
-          <p class="small">Você acertou <strong>${data.acertos}</strong> de <strong>${data.total}</strong> questões.</p>
-          <p class="small">Percentual: <strong>${Number(data.percentual || 0).toFixed(1)}%</strong></p>
-        </div>
-      `;
-    }
-
-    setTimeout(() => {
-      window.location.href = '/prova-codigo.html';
-    }, 2500);
+    if (container) container.classList.add('hidden');
+    mostrarConclusao(data);
+    await verificarNovasConquistas();
   } catch (error) {
     alert(error.message || 'Erro ao finalizar prova');
     window.location.href = '/prova-codigo.html';
   }
+}
+
+async function verificarNovasConquistas() {
+  try {
+    const res = await fetch(`${API}/me/conquistas`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const novas = Array.isArray(data.novas_conquistas) ? data.novas_conquistas : [];
+    novas.forEach((conquista, index) => {
+      window.setTimeout(() => mostrarPopupConquista(conquista), index * 550);
+    });
+  } catch (error) {
+    console.warn('Não foi possível verificar novas conquistas', error);
+  }
+}
+
+function mostrarPopupConquista(conquista) {
+  let stack = document.getElementById('achievement-stack');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.id = 'achievement-stack';
+    stack.setAttribute('aria-live', 'polite');
+    document.body.appendChild(stack);
+  }
+  const icones = { primeira_prova: '🎯', tres_provas: '⚡', dez_provas: '🏅', cinquenta_provas: '👑', prova_perfeita: '💯', xp_100: '✨', nivel_5: '🚀', nivel_10: '🌟', streak_3: '🔥', streak_7: '🏆' };
+  const popup = document.createElement('article');
+  popup.className = 'achievement-popup';
+  popup.innerHTML = `
+    <div class="achievement-popup__icon">${icones[conquista.chave] || '🏆'}</div>
+    <div><small>CONQUISTA DESBLOQUEADA</small><strong>${escapeHtml(conquista.titulo)}</strong><p>${escapeHtml(conquista.descricao)}</p></div>
+    <button class="achievement-popup__close" type="button" aria-label="Fechar">×</button>
+  `;
+  popup.querySelector('.achievement-popup__close')?.addEventListener('click', () => popup.remove());
+  stack.appendChild(popup);
+  window.setTimeout(() => popup.classList.add('is-visible'), 20);
+  window.setTimeout(() => {
+    popup.classList.remove('is-visible');
+    window.setTimeout(() => popup.remove(), 240);
+  }, 6000);
+}
+
+function mostrarConclusao(data) {
+  const resultado = el('resultado-prova');
+  if (!resultado) return;
+
+  const percentual = Number(data.percentual || 0);
+  const xpGanho = Number(data.xp_ganho || 0);
+  const nivel = Number(data.nivel || 1);
+  const subiuNivel = Boolean(data.subiu_nivel);
+
+  resultado.innerHTML = `
+    <div class="conclusao-prova__icon" aria-hidden="true">${subiuNivel ? '✨' : '🏆'}</div>
+    <p class="eyebrow">Resultado da prova</p>
+    <h4>${subiuNivel ? `Você chegou ao nível ${nivel}!` : 'Prova concluída!'}</h4>
+    <p class="small">${subiuNivel ? 'Seu desempenho liberou um novo nível.' : 'Suas respostas foram registradas com sucesso.'}</p>
+    <div class="conclusao-prova__metricas">
+      <div><strong>${Number(data.acertos || 0)}/${Number(data.total || 0)}</strong><span>acertos</span></div>
+      <div><strong>${percentual.toFixed(1)}%</strong><span>precisão</span></div>
+      <div><strong>+${xpGanho}</strong><span>XP ganho</span></div>
+      <div><strong>${nivel}</strong><span>nível atual</span></div>
+    </div>
+    <button id="voltar-provas-btn" class="btn btn-primary" type="button">Voltar para provas</button>
+  `;
+  resultado.classList.remove('hidden');
+  el('voltar-provas-btn')?.addEventListener('click', () => {
+    sessionStorage.removeItem('provaAtual');
+    window.location.href = '/prova-codigo.html';
+  });
 }
 
 document.addEventListener('DOMContentLoaded', () => {

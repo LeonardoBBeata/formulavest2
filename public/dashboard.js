@@ -7,8 +7,21 @@ function escapeHtml(value = '') {
     .replace(/'/g, '&#39;');
 }
 
-async function carregarHistorico(){
-    const res = await fetch('/provas');
+let paginaAtual = 1;
+let temMais = false;
+
+async function carregarHistorico(anexar = false){
+    if (localStorage.getItem('auth_session') !== '1') {
+        window.location.replace('/login.html');
+        return;
+    }
+    const res = await fetch(`/provas?page=${paginaAtual}&limit=10`);
+    if (res.status === 401 || res.status === 403) {
+        localStorage.removeItem('auth_session');
+        window.location.replace('/login.html');
+        return;
+    }
+    if (!res.ok) throw new Error('Não foi possível carregar o histórico');
     const data = await res.json();
     const container = document.getElementById('resultado');
 
@@ -17,7 +30,7 @@ async function carregarHistorico(){
         return;
     }
 
-    container.innerHTML = data.provas.map((p,i)=>{
+    const provasHtml = data.provas.map((p,i)=>{
         let acertos = 0;
         const questoesHTML = p.questoes.map((q,j)=>{
             const selecionada = q.selecionada || 'Não respondida';
@@ -35,20 +48,32 @@ async function carregarHistorico(){
                     </div>`;
         }).join('');
 
-        const percAcertos = Math.round((acertos / p.questoes.length) * 100);
+        const percAcertos = p.questoes.length ? Math.round((acertos / p.questoes.length) * 100) : 0;
 
         return `<div class="prova-card">
-                    <h3>Prova ${i+1} - ${escapeHtml(new Date(p.data).toLocaleString())}</h3>
+                    <h3>Prova ${i+1} - ${escapeHtml(new Date(p.criado_em || p.data).toLocaleString())}</h3>
                     <div class="progresso">
                         <div class="progresso-fill" style="width:${percAcertos}%">${percAcertos}%</div>
                     </div>
                     ${questoesHTML}
                 </div>`;
     }).join('');
+    container.innerHTML = anexar ? container.innerHTML + provasHtml : provasHtml;
+
+    temMais = Boolean(data.has_more);
+    const actions = document.getElementById('historico-actions');
+    if (actions) {
+      actions.innerHTML = temMais ? '<button id="carregar-mais" class="btn-blue" type="button">Carregar mais provas</button>' : '';
+      document.getElementById('carregar-mais')?.addEventListener('click', () => {
+        paginaAtual += 1;
+        carregarHistorico(true);
+      });
+    }
 }
 
 document.getElementById('logout-btn').addEventListener('click', async ()=>{
-    await fetch('/logout',{method:'POST'});
+    await fetch('/logout',{method:'POST', credentials: 'same-origin'});
+    localStorage.removeItem('auth_session');
     location.href='/';
 });
 

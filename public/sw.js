@@ -1,4 +1,4 @@
-const CACHE_NAME = 'formulavest-v3';
+const CACHE_NAME = 'formulavest-v5';
 const SHELL_ASSETS = [
   '/',
   '/landing.html',
@@ -24,13 +24,34 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
+  const requestUrl = new URL(event.request.url);
+
+  // Nunca armazene chamadas de API ou páginas autenticadas. Cachear /me, painéis
+  // ou arquivos JS indiscriminadamente fazia a aplicação reaproveitar sessões e
+  // versões antigas do front-end.
+  if (
+    event.request.method !== 'GET' ||
+    requestUrl.origin !== self.location.origin ||
+    requestUrl.pathname.startsWith('/admin') ||
+    requestUrl.pathname.startsWith('/professor') ||
+    requestUrl.pathname.startsWith('/me') ||
+    requestUrl.pathname.startsWith('/provas')
+  ) {
+    return;
+  }
+
   event.respondWith(
-    caches.match(event.request).then(cached => cached || fetch(event.request).then(response => {
-      const copy = response.clone();
-      if (event.request.method === 'GET') {
-        caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
-      }
-      return response;
-    }).catch(() => caches.match('/landing.html')))
+    fetch(event.request)
+      .then(async response => {
+        if (response.ok && SHELL_ASSETS.includes(requestUrl.pathname)) {
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(event.request, response.clone());
+        }
+        return response;
+      })
+      .catch(async () => {
+        const cached = await caches.match(event.request);
+        return cached || (await caches.match('/landing.html'));
+      })
   );
 });

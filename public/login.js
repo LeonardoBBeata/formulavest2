@@ -128,9 +128,7 @@ document
     }
 
     if (data.dev_codigo) {
-      alert(
-        `Codigo de login para teste: ${data.dev_codigo}`
-      );
+      alert(`Código de teste para login: ${data.dev_codigo}`);
     }
 
     // ADM entra direto
@@ -171,10 +169,7 @@ document
         return;
       }
 
-      localStorage.setItem(
-        "token",
-        data2.token
-      );
+      localStorage.setItem('auth_session', '1');
 
       // redirect according to role returned
       if (data2.role === 'professor') {
@@ -243,10 +238,7 @@ document
       return;
     }
 
-    localStorage.setItem(
-      "token",
-      data.token
-    );
+      localStorage.setItem('auth_session', '1');
 
     // ======================
     // REDIRECIONAMENTO
@@ -264,9 +256,7 @@ document
           "Sua conta não é administrador."
         );
 
-        localStorage.removeItem(
-          "token"
-        );
+        localStorage.removeItem('auth_session');
 
         mostrar(
           "login-box"
@@ -358,18 +348,12 @@ document
         return;
       }
 
-      if (data.dev_codigo) {
-        const aviso = document.getElementById('codigo-aviso');
-        const mensagem = data.email_enviado
-          ? `Código de verificação enviado para o seu e-mail: ${data.dev_codigo}`
-          : `Não foi possível enviar o e-mail. Use este código para validar sua conta: ${data.dev_codigo}`;
-
-        if (aviso) {
-          aviso.textContent = mensagem;
-          aviso.classList.remove('hidden');
-        }
-
-        alert(mensagem);
+      const aviso = document.getElementById('codigo-aviso');
+      if (aviso) {
+        aviso.textContent = data.dev_codigo
+          ? `Código de teste: ${data.dev_codigo}`
+          : 'Enviamos um código de verificação para o seu e-mail.';
+        aviso.classList.remove('hidden');
       }
 
       mostrar(
@@ -387,6 +371,26 @@ document
         "Cadastrar";
     }
   };
+
+document.getElementById('reenviar-cadastro-btn').onclick = async () => {
+  if (!cadastroEmail) return;
+  const button = document.getElementById('reenviar-cadastro-btn');
+  button.disabled = true;
+  try {
+    const res = await fetch(`${API}/reenviar-verificacao`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cadastroEmail })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Não foi possível reenviar o código');
+    alert(data.dev_codigo ? `Novo código de teste: ${data.dev_codigo}` : 'Novo código enviado.');
+  } catch (err) {
+    alert(err.message || 'Não foi possível reenviar o código');
+  } finally {
+    button.disabled = false;
+  }
+};
 
 // ======================
 // CONFIRMAR CADASTRO

@@ -300,13 +300,15 @@
 
 <!-- FINAL SCREEN -->
 <div id="final-screen" class="hidden">
-  <div>
-    <h1>Resultado</h1>
-    <p id="final-text"></p>
-
-    <button id="close-final-screen-btn" type="button">
-      Fechar
-    </button>
+  <div class="resultado-modal" role="dialog" aria-modal="true" aria-labelledby="resultado-title">
+    <div class="resultado-icon" aria-hidden="true">🏆</div>
+    <p class="eyebrow">Prova concluída</p>
+    <h1 id="resultado-title">Muito bem!</h1>
+    <p id="resultado-mensagem" class="resultado-mensagem"></p>
+    <div id="final-text" class="resultado-metricas"></div>
+    <div class="resultado-acoes">
+      <button id="close-final-screen-btn" type="button">Continuar estudando</button>
+    </div>
   </div>
 </div>
 

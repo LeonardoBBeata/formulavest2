@@ -15,7 +15,8 @@ function gerarToken(user) {
       role: user.role,
       empresa_id: user.empresa_id,
       escola_id: user.escola_id,
-      sala_id: user.sala_id
+      sala_id: user.sala_id,
+      token_version: user.token_version || 0
     },
     process.env.JWT_SECRET,
     {
@@ -45,30 +46,28 @@ function permitir(...roles) {
 
 async function auth(req, res, next) {
   const header = req.headers.authorization;
+  const headerToken = header?.startsWith('Bearer ') ? header.slice(7).trim() : null;
+  const token = headerToken && headerToken !== 'null' && headerToken !== 'undefined'
+    ? headerToken
+    : req.cookies?.accessToken;
 
-  if (!header) {
-    return res.status(401).json({
-      error: 'Token ausente'
-    });
-  }
-
-  if (!header.startsWith('Bearer ')) {
+  if (header && !header.startsWith('Bearer ')) {
     return res.status(401).json({
       error: 'Token invalido'
     });
   }
 
-  const token = header.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Token ausente' });
 
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET, jwtOptions);
     const result = await db.query(
-      `SELECT id, username, role, empresa_id, escola_id, sala_id, banido, verificado
+      `SELECT id, username, role, empresa_id, escola_id, sala_id, banido, verificado, token_version
        FROM usuarios WHERE id = $1`,
       [payload.id]
     );
     const user = result.rows[0];
-    if (!user || user.banido || !user.verificado) {
+    if (!user || user.banido || !user.verificado || Number(payload.token_version || 0) !== Number(user.token_version || 0)) {
       return res.status(401).json({ error: 'Sessao invalida' });
     }
     req.user = user;

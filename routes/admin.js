@@ -22,12 +22,20 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
   async function assertEscolaPermitida(req, escolaId) {
     const escola = await db.query('SELECT id, empresa_id FROM escolas WHERE id = $1', [escolaId]);
     const item = escola.rows[0];
-    if (!item) throw new Error('Escola inválida');
-    if (req.user.role !== 'formulavest_master' && item.empresa_id !== req.user.empresa_id) {
-      throw new Error('Sem permissao para esta escola');
+    if (!item) {
+      const error = new Error('Escola inválida');
+      error.status = 404;
+      throw error;
+    }
+    if (req.user.role !== 'formulavest_master' && Number(item.empresa_id) !== Number(req.user.empresa_id)) {
+      const error = new Error('Sem permissao para esta escola');
+      error.status = 403;
+      throw error;
     }
     if (['diretor', 'coordenador'].includes(req.user.role) && Number(item.id) !== Number(req.user.escola_id)) {
-      throw new Error('Sem permissao para esta escola');
+      const error = new Error('Sem permissao para esta escola');
+      error.status = 403;
+      throw error;
     }
     return item;
   }
@@ -37,16 +45,17 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
     if (periodoId) {
       const r = await db.query('SELECT * FROM periodos WHERE id=$1 AND escola_id=$2', [periodoId, escola.id]);
       if (r.rows.length === 0) throw new Error('Período inválido');
-      return r.rows[0];
+      return { ...r.rows[0], empresa_id: escola.empresa_id };
     }
 
     if (!periodoNome) throw new Error('Período não informado');
 
     const found = await db.query('SELECT * FROM periodos WHERE escola_id=$1 AND LOWER(nome)=LOWER($2)', [escolaId, periodoNome]);
-    if (found.rows.length) return found.rows[0];
+    if (found.rows.length) return { ...found.rows[0], empresa_id: escola.empresa_id };
 
-    const ins = await db.query('INSERT INTO periodos(escola_id,nome) VALUES($1,$2) RETURNING *', [escolaId, periodoNome]);
-    return ins.rows[0];
+    const ins = await db.query('INSERT INTO periodos(escola_id,nome) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING *', [escolaId, periodoNome]);
+    const period = ins.rows[0] || (await db.query('SELECT * FROM periodos WHERE escola_id=$1 AND LOWER(nome)=LOWER($2)', [escolaId, periodoNome])).rows[0];
+    return { ...period, empresa_id: escola.empresa_id };
   }
 
   async function buscarSalaParaPeriodo(periodoId, salaId, salaNome) {
@@ -61,8 +70,8 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
     const found = await db.query('SELECT * FROM salas WHERE periodo_id=$1 AND LOWER(nome)=LOWER($2)', [periodoId, salaNome]);
     if (found.rows.length) return found.rows[0];
 
-    const ins = await db.query('INSERT INTO salas(periodo_id,nome) VALUES($1,$2) RETURNING *', [periodoId, salaNome]);
-    return ins.rows[0];
+    const ins = await db.query('INSERT INTO salas(periodo_id,nome) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING *', [periodoId, salaNome]);
+    return ins.rows[0] || (await db.query('SELECT * FROM salas WHERE periodo_id=$1 AND LOWER(nome)=LOWER($2)', [periodoId, salaNome])).rows[0];
   }
 
   async function criarAlunoNoSistema(req, dados) {
@@ -100,7 +109,8 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
 
   function podeGerenciarUsuario(req, alvo) {
     if (req.user.role === 'formulavest_master') return true;
-    if (alvo.empresa_id !== req.user.empresa_id) return false;
+    if (Number(alvo.empresa_id) !== Number(req.user.empresa_id)) return false;
+    if (['diretor', 'coordenador'].includes(req.user.role) && Number(alvo.escola_id) !== Number(req.user.escola_id)) return false;
     if (req.user.role === 'coordenador' && !['professor', 'aluno'].includes(alvo.role)) return false;
     return (nivelRole[req.user.role] || 0) > (nivelRole[alvo.role] || 0);
   }
@@ -196,7 +206,7 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
 
       params.push(limit);
       params.push(offset);
-      const usersResult = await db.query(`SELECT * FROM usuarios ${whereClause} ORDER BY id DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+      const usersResult = await db.query(`SELECT id, username, email, role, empresa_id, escola_id, periodo_id, sala_id, verificado, banido, xp, nivel, criado_em, last_active, foto FROM usuarios ${whereClause} ORDER BY id DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
       const users = usersResult.rows;
 
       const userIds = users.map((user) => user.id);
@@ -241,7 +251,7 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
       const id = Number(req.params.id || 0);
       if (!id) return res.status(400).json({ error: 'ID invalido' });
 
-      const targetRes = await db.query('SELECT * FROM usuarios WHERE id = $1', [id]);
+      const targetRes = await db.query('SELECT id, role, empresa_id, escola_id FROM usuarios WHERE id = $1', [id]);
       if (targetRes.rows.length === 0) return res.status(404).json({ error: 'Usuario nao encontrado' });
       const alvo = targetRes.rows[0];
       if (!podeGerenciarUsuario(req, alvo)) return res.status(403).json({ error: 'Sem permissao' });
@@ -269,7 +279,8 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
         const salaRes = await db.query('SELECT s.id, s.periodo_id, p.escola_id, e.empresa_id FROM salas s JOIN periodos p ON p.id = s.periodo_id JOIN escolas e ON e.id = p.escola_id WHERE s.id = $1', [salaId]);
         if (salaRes.rows.length === 0) return res.status(404).json({ error: 'Sala invalida' });
         const sala = salaRes.rows[0];
-        if (req.user.role !== 'formulavest_master' && sala.empresa_id !== req.user.empresa_id) return res.status(403).json({ error: 'Sem permissao para esta sala' });
+        if (req.user.role !== 'formulavest_master' && Number(sala.empresa_id) !== Number(req.user.empresa_id)) return res.status(403).json({ error: 'Sem permissao para esta sala' });
+        if (['diretor', 'coordenador'].includes(req.user.role) && Number(sala.escola_id) !== Number(req.user.escola_id)) return res.status(403).json({ error: 'Sem permissao para esta sala' });
         if (finalEscolaId && sala.escola_id !== finalEscolaId) return res.status(400).json({ error: 'Escola e sala inconsistente' });
         finalEscolaId = sala.escola_id;
       }
@@ -285,16 +296,19 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
 
         if (salasRes.rows.length !== salaIds.length) return res.status(404).json({ error: 'Uma ou mais salas atribuídas são inválidas' });
         if (req.user.role !== 'formulavest_master') {
-          const invalid = salasRes.rows.some((s) => s.empresa_id !== req.user.empresa_id);
+          const invalid = salasRes.rows.some((s) => Number(s.empresa_id) !== Number(req.user.empresa_id) || (['diretor', 'coordenador'].includes(req.user.role) && Number(s.escola_id) !== Number(req.user.escola_id)));
           if (invalid) return res.status(403).json({ error: 'Sem permissao para atribuir uma ou mais salas' });
         }
       }
 
       if (finalEscolaId) {
-        const escolaRes = await db.query('SELECT id, empresa_id FROM escolas WHERE id = $1', [finalEscolaId]);
-        if (escolaRes.rows.length === 0) return res.status(404).json({ error: 'Escola invalida' });
-        const escola = escolaRes.rows[0];
-        if (req.user.role !== 'formulavest_master' && escola.empresa_id !== req.user.empresa_id) return res.status(403).json({ error: 'Sem permissao para esta escola' });
+        let escola;
+        try {
+          escola = await assertEscolaPermitida(req, finalEscolaId);
+        } catch (err) {
+          return res.status(err.message === 'Escola inválida' ? 404 : 403).json({ error: err.message });
+        }
+        if (Number(escola.empresa_id) !== Number(alvo.empresa_id)) return res.status(400).json({ error: 'Escola incompatível com a empresa do usuário' });
       }
 
       const updates = ['username', 'email', 'role', 'escola_id', 'sala_id'];
@@ -335,7 +349,7 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
       const id = Number(req.params.id || 0);
       if (!id) return res.status(400).json({ error: 'ID invalido' });
 
-      const targetRes = await db.query('SELECT * FROM usuarios WHERE id = $1', [id]);
+      const targetRes = await db.query('SELECT id, role, empresa_id, escola_id FROM usuarios WHERE id = $1', [id]);
       if (targetRes.rows.length === 0) return res.status(404).json({ error: 'Usuario nao encontrado' });
       const alvo = targetRes.rows[0];
       if (!podeGerenciarUsuario(req, alvo)) return res.status(403).json({ error: 'Sem permissao' });
@@ -353,7 +367,7 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
       const id = Number(req.params.id || 0);
       if (!id) return res.status(400).json({ error: 'ID invalido' });
 
-      const targetRes = await db.query('SELECT * FROM usuarios WHERE id = $1', [id]);
+      const targetRes = await db.query('SELECT id, role, empresa_id, escola_id FROM usuarios WHERE id = $1', [id]);
       if (targetRes.rows.length === 0) return res.status(404).json({ error: 'Usuario nao encontrado' });
       const alvo = targetRes.rows[0];
       if (!podeGerenciarUsuario(req, alvo)) return res.status(403).json({ error: 'Sem permissao' });
@@ -425,12 +439,13 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
       res.json({ ok: true });
     } catch (err) {
       console.error(err);
-      res.status(400).json({ error: err.message || 'Erro criar aluno' });
+      res.status(err.status || 400).json({ error: err.message || 'Erro criar aluno' });
     }
   });
 
   app.post('/admin/criar-escola', auth, permitir('formulavest_master', 'empresa_admin', 'diretor', 'coordenador'), async (req, res) => {
     try {
+      if (!['formulavest_master', 'empresa_admin'].includes(req.user.role)) return res.status(403).json({ error: 'Sem permissao para criar escolas' });
       const nome = String(req.body.nome || '').trim();
       if (!nome) return res.status(400).json({ error: 'Nome da escola obrigatorio' });
 
@@ -459,16 +474,17 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
 
       const escola = await db.query('SELECT * FROM escolas WHERE id = $1', [escolaId]);
       if (escola.rows.length === 0) return res.status(404).json({ error: 'Escola nao encontrada' });
-      if (req.user.role !== 'formulavest_master' && escola.rows[0].empresa_id !== req.user.empresa_id) return res.status(403).json({ error: 'Sem permissao' });
+      await assertEscolaPermitida(req, escolaId);
 
       const exists = await db.query('SELECT id FROM periodos WHERE escola_id = $1 AND LOWER(nome) = LOWER($2)', [escolaId, nome]);
       if (exists.rows.length) return res.status(400).json({ error: 'Periodo ja existe' });
 
-      const result = await db.query('INSERT INTO periodos(escola_id,nome) VALUES($1,$2) RETURNING *', [escolaId, nome]);
+      const result = await db.query('INSERT INTO periodos(escola_id,nome) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING *', [escolaId, nome]);
+      if (!result.rows.length) return res.status(409).json({ error: 'Periodo ja existe' });
       res.json({ periodo: result.rows[0] });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: 'Erro criar periodo' });
+      res.status(err.status || 500).json({ error: err.message || 'Erro criar periodo' });
     }
   });
 
@@ -480,16 +496,17 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
 
       const periodo = await db.query('SELECT p.*, e.empresa_id FROM periodos p JOIN escolas e ON e.id = p.escola_id WHERE p.id = $1', [periodoId]);
       if (periodo.rows.length === 0) return res.status(404).json({ error: 'Periodo nao encontrado' });
-      if (req.user.role !== 'formulavest_master' && periodo.rows[0].empresa_id !== req.user.empresa_id) return res.status(403).json({ error: 'Sem permissao' });
+      await assertEscolaPermitida(req, periodo.rows[0].escola_id);
 
       const exists = await db.query('SELECT id FROM salas WHERE periodo_id = $1 AND LOWER(nome) = LOWER($2)', [periodoId, nome]);
       if (exists.rows.length) return res.status(400).json({ error: 'Sala ja existe' });
 
-      const result = await db.query('INSERT INTO salas(periodo_id,nome) VALUES($1,$2) RETURNING *', [periodoId, nome]);
+      const result = await db.query('INSERT INTO salas(periodo_id,nome) VALUES($1,$2) ON CONFLICT DO NOTHING RETURNING *', [periodoId, nome]);
+      if (!result.rows.length) return res.status(409).json({ error: 'Sala ja existe' });
       res.json({ sala: result.rows[0] });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: 'Erro criar sala' });
+      res.status(err.status || 500).json({ error: err.message || 'Erro criar sala' });
     }
   });
 
@@ -498,6 +515,7 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
     try {
       const { alunos = [] } = req.body;
       if (!Array.isArray(alunos) || alunos.length === 0) return res.status(400).json({ error: 'Nenhum aluno informado' });
+      if (alunos.length > 100) return res.status(413).json({ error: 'Importe no máximo 100 alunos por requisição' });
       const criados = [];
       const erros = [];
       for (const [index, item] of alunos.entries()) {
@@ -543,15 +561,22 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
         escolaId = req.user.escola_id;
       }
 
+      if (['diretor', 'coordenador', 'professor', 'aluno'].includes(role) && !escolaId) {
+        return res.status(400).json({ error: 'Escola obrigatória para essa função' });
+      }
+
+      const empresa = await db.query('SELECT id FROM empresas WHERE id = $1', [empresaId]);
+      if (!empresa.rows.length) return res.status(404).json({ error: 'Empresa nao encontrada' });
       if (escolaId) {
-        await assertEscolaPermitida(req, escolaId);
+        const escola = await assertEscolaPermitida(req, escolaId);
+        if (Number(escola.empresa_id) !== Number(empresaId)) return res.status(400).json({ error: 'Escola e empresa inconsistentes' });
       }
       if (sala_id) {
         const sala = await carregarSalaComContexto(sala_id);
         if (!sala || (escolaId && Number(sala.escola_id) !== Number(escolaId))) {
           return res.status(400).json({ error: 'Sala inválida para a escola informada' });
         }
-        if (req.user.role !== 'formulavest_master' && sala.empresa_id !== req.user.empresa_id) {
+        if (Number(sala.empresa_id) !== Number(empresaId)) {
           return res.status(403).json({ error: 'Sem permissao para esta sala' });
         }
       }
@@ -560,7 +585,7 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
       res.json({ ok: true });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: 'Erro criar usuário' });
+      res.status(err.status || 500).json({ error: err.message || 'Erro criar usuário' });
     }
   });
 
@@ -571,10 +596,10 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
       const escola = await db.query('SELECT * FROM escolas WHERE id=$1', [escolaId]);
       if (escola.rows.length === 0) return res.status(404).json({ error: 'Escola não encontrada' });
       const esc = escola.rows[0];
-      if (req.user.role !== 'formulavest_master' && esc.empresa_id !== req.user.empresa_id) return res.status(403).json({ error: 'Sem permissão' });
+      await assertEscolaPermitida(req, esc.id);
       const result = await db.query('SELECT * FROM periodos WHERE escola_id=$1 ORDER BY id DESC', [escolaId]);
       res.json({ periodos: result.rows });
-    } catch (err) { console.error(err); res.status(500).json({ error: 'Erro listar períodos' }); }
+    } catch (err) { console.error(err); res.status(err.status || 500).json({ error: err.message || 'Erro listar períodos' }); }
   });
 
   app.get('/admin/salas/:periodoId', auth, permitir('formulavest_master','empresa_admin','diretor','coordenador','professor'), async (req, res) => {
@@ -582,10 +607,16 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
       const periodoId = req.params.periodoId;
       const periodo = await db.query('SELECT p.*, e.empresa_id FROM periodos p JOIN escolas e ON e.id = p.escola_id WHERE p.id = $1', [periodoId]);
       const p = periodo.rows[0]; if (!p) return res.status(404).json({ error: 'Periodo nao encontrado' });
-      if (req.user.role !== 'formulavest_master' && p.empresa_id !== req.user.empresa_id) return res.status(403).json({ error: 'Sem permissao' });
-      const result = await db.query('SELECT * FROM salas WHERE periodo_id = $1 ORDER BY id DESC', [periodoId]);
+      await assertEscolaPermitida(req, p.escola_id);
+      if (req.user.role === 'professor') {
+        const assigned = await db.query('SELECT 1 FROM professor_salas ps JOIN salas s ON s.id = ps.sala_id WHERE ps.professor_id = $1 AND s.periodo_id = $2 LIMIT 1', [req.user.id, periodoId]);
+        if (!assigned.rows.length) return res.status(403).json({ error: 'Sem permissao' });
+      }
+      const result = req.user.role === 'professor'
+        ? await db.query('SELECT s.* FROM salas s JOIN professor_salas ps ON ps.sala_id = s.id WHERE ps.professor_id = $1 AND s.periodo_id = $2 ORDER BY s.id DESC', [req.user.id, periodoId])
+        : await db.query('SELECT * FROM salas WHERE periodo_id = $1 ORDER BY id DESC', [periodoId]);
       res.json({ salas: result.rows });
-    } catch (err) { console.error(err); res.status(500).json({ error: 'Erro listar salas' }); }
+    } catch (err) { console.error(err); res.status(err.status || 500).json({ error: err.message || 'Erro listar salas' }); }
   });
 
   app.put('/admin/escola/:id', auth, permitir('formulavest_master','empresa_admin','diretor','coordenador'), async (req, res) => {
@@ -597,7 +628,7 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
       const escolaRes = await db.query('SELECT * FROM escolas WHERE id = $1', [id]);
       if (escolaRes.rows.length === 0) return res.status(404).json({ error: 'Escola nao encontrada' });
       const escola = escolaRes.rows[0];
-      if (req.user.role !== 'formulavest_master' && escola.empresa_id !== req.user.empresa_id) return res.status(403).json({ error: 'Sem permissao' });
+      await assertEscolaPermitida(req, escola.id);
 
       const conflict = await db.query('SELECT id FROM escolas WHERE empresa_id = $1 AND LOWER(nome) = LOWER($2) AND id <> $3', [escola.empresa_id, nome, id]);
       if (conflict.rows.length) return res.status(400).json({ error: 'Ja existe outra escola com esse nome' });
@@ -619,7 +650,7 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
       const periodoRes = await db.query('SELECT p.*, e.empresa_id FROM periodos p JOIN escolas e ON e.id = p.escola_id WHERE p.id = $1', [id]);
       if (periodoRes.rows.length === 0) return res.status(404).json({ error: 'Periodo nao encontrado' });
       const periodo = periodoRes.rows[0];
-      if (req.user.role !== 'formulavest_master' && periodo.empresa_id !== req.user.empresa_id) return res.status(403).json({ error: 'Sem permissao' });
+      await assertEscolaPermitida(req, periodo.escola_id);
 
       const conflict = await db.query('SELECT id FROM periodos WHERE escola_id = $1 AND LOWER(nome) = LOWER($2) AND id <> $3', [periodo.escola_id, nome, id]);
       if (conflict.rows.length) return res.status(400).json({ error: 'Ja existe outro periodo com esse nome' });
@@ -644,7 +675,7 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
       );
       if (salaRes.rows.length === 0) return res.status(404).json({ error: 'Sala nao encontrada' });
       const sala = salaRes.rows[0];
-      if (req.user.role !== 'formulavest_master' && sala.empresa_id !== req.user.empresa_id) return res.status(403).json({ error: 'Sem permissao' });
+      await assertEscolaPermitida(req, sala.escola_id);
 
       const conflict = await db.query('SELECT id FROM salas WHERE periodo_id = $1 AND LOWER(nome) = LOWER($2) AND id <> $3', [sala.periodo_id, nome, id]);
       if (conflict.rows.length) return res.status(400).json({ error: 'Ja existe outra sala com esse nome neste periodo' });
@@ -713,7 +744,7 @@ module.exports = function registerAdminRoutes(app, deps = {}) {
       if (exists.rows.length) return res.status(400).json({ error: 'Usuario ja existe' });
 
       const hash = await bcrypt.hash(senha, 10);
-      const user = await db.query('INSERT INTO usuarios(username,email,senha,role,empresa_id,verificado) VALUES($1,$2,$3,$4,$5,TRUE) RETURNING *', [username, email.toLowerCase(), hash, 'empresa_admin', empresaId]);
+      const user = await db.query('INSERT INTO usuarios(username,email,senha,role,empresa_id,verificado) VALUES($1,$2,$3,$4,$5,TRUE) RETURNING id, username, email, role, empresa_id, verificado, criado_em', [username, email.toLowerCase(), hash, 'empresa_admin', empresaId]);
       res.json({ usuario: user.rows[0] });
     } catch (err) {
       console.error(err);

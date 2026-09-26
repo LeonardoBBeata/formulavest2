@@ -1,6 +1,6 @@
 const API = window.location.origin;
 
-if (!localStorage.getItem('token')) {
+if (localStorage.getItem('auth_session') !== '1') {
   window.location.href = '/login.html';
 }
 
@@ -43,15 +43,14 @@ function escapeHtml(value = '') {
 }
 
 function authHeaders() {
-  const token = localStorage.getItem('token');
   return {
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {})
+    'Content-Type': 'application/json'
   };
 }
 
-function logout() {
-  localStorage.removeItem('token');
+async function logout() {
+  await fetch('/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+  localStorage.removeItem('auth_session');
   window.location.href = '/login.html';
 }
 

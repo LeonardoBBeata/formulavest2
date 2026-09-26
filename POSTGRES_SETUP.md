@@ -19,13 +19,19 @@ JWT_SECRET=troque_por_uma_chave_grande_e_secreta
 MASTER_PASSWORD=troque_por_uma_senha_forte
 ```
 
-3) Install dependencies and start server:
+3) Install dependencies and apply versioned migrations:
 
 ```bash
 npm install
+npm run db:migrate
+```
+
+4) Start the server after migrations succeed:
+
+```bash
 npm run dev
 ```
 
-4) On first run the server will initialize the DB schema and create a master admin if `MASTER_PASSWORD` is set.
+The server checks that the latest required migration is applied and refuses to start against an incomplete schema. For local development, use `DATABASE_SSL=false`; production must use TLS with certificate verification enabled. The master admin is created on startup if `MASTER_PASSWORD` is set.
 
 If you prefer to provide individual PG_* variables, set `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD` and `PGDATABASE` instead of `DATABASE_URL`.

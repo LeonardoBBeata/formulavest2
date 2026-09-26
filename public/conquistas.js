@@ -1,21 +1,35 @@
 const API = window.location.origin;
-const token = localStorage.getItem('token');
+const token = null;
 
 function el(id){return document.getElementById(id);} 
 
+function escapeHtml(value = '') {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
-  if (!token) return window.location.href = '/login.html';
+  if (localStorage.getItem('auth_session') !== '1') return window.location.href = '/login.html';
   await carregarBadges();
   await carregarHistorico();
   document.getElementById('badge-modal-close')?.addEventListener('click', ()=> el('badge-modal').classList.add('hidden'));
 });
 
 const BADGES = [
-  { key:'primeira_prova', title:'Primeira Prova', desc:'Concluiu a primeira prova.', icon:'🎉' },
-  { key:'dez_provas', title:'10 Provas', desc:'Concluiu 10 provas.', icon:'🔟' },
-  { key:'cinquenta_provas', title:'50 Provas', desc:'Concluiu 50 provas.', icon:'🏅' },
-  { key:'nivel_10', title:'Nível 10', desc:'Alcançou o nível 10.', icon:'🚀' },
-  { key:'streak_7', title:'Streak 7 dias', desc:'Estudou 7 dias seguidos.', icon:'🔥' }
+  { key:'primeira_prova', title:'Primeiros passos', desc:'Concluiu a primeira prova.', icon:'🎯' },
+  { key:'tres_provas', title:'Em ritmo', desc:'Concluiu 3 provas.', icon:'⚡' },
+  { key:'dez_provas', title:'10 provas', desc:'Concluiu 10 provas.', icon:'🏅' },
+  { key:'cinquenta_provas', title:'Veterano', desc:'Concluiu 50 provas.', icon:'👑' },
+  { key:'prova_perfeita', title:'Nota máxima', desc:'Acertou 100% de uma prova.', icon:'💯' },
+  { key:'xp_100', title:'100 XP', desc:'Acumulou seus primeiros 100 XP.', icon:'✨' },
+  { key:'nivel_5', title:'Nível 5', desc:'Alcançou o nível 5.', icon:'🚀' },
+  { key:'nivel_10', title:'Nível 10', desc:'Alcançou o nível 10.', icon:'🌟' },
+  { key:'streak_3', title:'Constância', desc:'Concluiu provas por 3 dias seguidos.', icon:'🔥' },
+  { key:'streak_7', title:'Semana imparável', desc:'Concluiu provas por 7 dias seguidos.', icon:'🏆' }
 ];
 
 async function carregarBadges(){
@@ -33,9 +47,9 @@ async function carregarBadges(){
       item.innerHTML = `
         <div class="badge-ico ${ok ? 'badge-success' : 'badge-locked'}">${b.icon}</div>
         <div class="badge-title">${b.title}</div>
-        <div class="badge-sub">${ok ? 'Conquistado' : 'Bloqueado'}</div>
+        <div class="badge-sub">${ok ? 'Conquistado' : b.desc}</div>
         <div class="badge-actions">
-          <button class="btn-share">Compartilhar</button>
+          ${ok ? '<button class="btn-share">Compartilhar</button>' : ''}
           <button class="btn-secondary-ghost">Detalhes</button>
         </div>
       `;

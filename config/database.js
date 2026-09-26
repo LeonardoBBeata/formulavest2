@@ -21,7 +21,7 @@ const db = new Pool({
   connectionString,
   ssl: useSSL
     ? {
-        rejectUnauthorized: false
+        rejectUnauthorized: true
       }
     : false,
   max: poolMax,
@@ -45,6 +45,16 @@ async function initDB() {
     return false;
   }
 
+  if (process.env.DB_AUTO_MIGRATE !== 'true') {
+    const migration = await db.query(
+      "SELECT 1 FROM schema_migrations WHERE filename = '011_unique_school_names.sql'"
+    );
+    if (!migration.rows.length) {
+      throw new Error('Migrations pendentes. Execute npm run db:migrate antes de iniciar a aplicação.');
+    }
+    return true;
+  }
+
   await db.query(`
     CREATE TABLE IF NOT EXISTS usuarios(
       id SERIAL PRIMARY KEY,
@@ -56,6 +66,16 @@ async function initDB() {
       xp INTEGER DEFAULT 0,
       nivel INTEGER DEFAULT 1,
       criado_em TIMESTAMP DEFAULT NOW()
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS refresh_tokens(
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES usuarios(id) ON DELETE CASCADE,
+      token TEXT UNIQUE NOT NULL,
+      expires_at TIMESTAMP NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
     )
   `);
 
@@ -204,6 +224,19 @@ async function initDB() {
       meta JSONB DEFAULT '{}',
       criado_em TIMESTAMP DEFAULT NOW()
     )
+  `);
+
+  await db.query(`
+    DELETE FROM conquistas_historico a
+    USING conquistas_historico b
+    WHERE a.usuario_id = b.usuario_id
+      AND a.chave = b.chave
+      AND a.id > b.id
+  `);
+
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_conquistas_usuario_chave
+    ON conquistas_historico(usuario_id, chave)
   `);
 
   await db.query(`

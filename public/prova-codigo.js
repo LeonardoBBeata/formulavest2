@@ -1,7 +1,7 @@
 const API = window.location.origin;
-const token = localStorage.getItem('token');
+const token = null;
 
-if (!token) {
+if (localStorage.getItem('auth_session') !== '1') {
   window.location.href = '/login.html';
 }
 

@@ -1,41 +1,72 @@
+require('dotenv').config();
+
 const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
 
-const connectionString = process.env.DATABASE_URL || '';
-const pool = new Pool({ connectionString });
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error('DATABASE_URL não definido. Configure-o antes de executar migrations.');
+}
+const pool = new Pool({
+  connectionString,
+  ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: true } : false
+});
 
 async function run() {
+  const client = await pool.connect();
+  let lockAcquired = false;
   const migrationsDir = path.join(__dirname, '..', 'migrations');
-  if (!fs.existsSync(migrationsDir)) {
-    console.error('No migrations directory found:', migrationsDir);
-    process.exit(1);
-  }
+  try {
+    if (!fs.existsSync(migrationsDir)) {
+      throw new Error(`No migrations directory found: ${migrationsDir}`);
+    }
 
-  const files = fs.readdirSync(migrationsDir)
-    .filter(f => f.endsWith('.sql'))
-    .sort();
+    await client.query('SELECT pg_advisory_lock($1)', [73190521]);
+    lockAcquired = true;
+    const files = fs.readdirSync(migrationsDir)
+      .filter(file => /^\d+_.+\.sql$/.test(file))
+      .sort();
 
-  for (const file of files) {
-    const full = path.join(migrationsDir, file);
-    const sql = fs.readFileSync(full, 'utf8');
-    console.log('Running', file);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        filename TEXT PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    for (const file of files) {
+      const applied = await client.query('SELECT 1 FROM schema_migrations WHERE filename = $1', [file]);
+      if (applied.rows.length) {
+        console.log('Skipping', file);
+        continue;
+      }
+
+      const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+      console.log('Running', file);
+      try {
+        await client.query('BEGIN');
+        await client.query(sql);
+        await client.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [file]);
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw new Error(`Migration failed: ${file}: ${err.message}`, { cause: err });
+      }
+    }
+
+    console.log('Migrations applied');
+  } finally {
     try {
-      await pool.query('BEGIN');
-      await pool.query(sql);
-      await pool.query('COMMIT');
-    } catch (err) {
-      await pool.query('ROLLBACK');
-      console.error('Migration failed:', file, err.message);
-      process.exit(1);
+      if (lockAcquired) await client.query('SELECT pg_advisory_unlock($1)', [73190521]);
+    } finally {
+      client.release();
+      await pool.end();
     }
   }
-
-  console.log('Migrations applied');
-  await pool.end();
 }
 
 run().catch(err => {
   console.error(err);
-  process.exit(1);
+  process.exitCode = 1;
 });
