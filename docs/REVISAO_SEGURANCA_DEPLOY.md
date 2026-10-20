@@ -31,7 +31,7 @@ docker compose -f docker-compose.prod.yml up -d postgres
 docker compose -f docker-compose.prod.yml run --rm app npm run db:migrate
 ```
 
-5. Confirmar que a migration `011_unique_school_names.sql` aparece em `schema_migrations`; validar as FKs `NOT VALID` e rever nomes legados ajustados. Índices únicos bloqueiam novas duplicatas.
+5. Confirmar que a migration `012_achievements_unique.sql` aparece em `schema_migrations`; validar as FKs `NOT VALID` e rever nomes legados ajustados. Índices únicos bloqueiam novas duplicatas e duplicação no histórico de conquistas.
 6. Subir o servico e conferir `/health`, `/health/db`, logs e um fluxo de autenticacao real:
 
 ```bash
@@ -50,6 +50,7 @@ docker compose -f docker-compose.prod.yml logs --tail=100 app
 - Salvamento de prova deriva total/nota do gabarito, com XP e finalizacao na mesma transacao.
 - Rotas de IA tem cota por usuario, redações/importações tem limites e DOCX e verificado por tamanho de expansao antes da extração.
 - Runner de migrations aplica cada arquivo na mesma conexao/transacao; o startup normal exige a migration atual.
+- Conquistas desbloqueiam por provas, XP, nível e streak; o histórico tem índice único e foi validado em PostgreSQL, incluindo idempotência das notificações.
 
 ## Seguranca e arquitetura: pendencias
 
@@ -64,7 +65,7 @@ docker compose -f docker-compose.prod.yml logs --tail=100 app
 
 ## Validacao minima antes de release
 
-- [ ] `npm test -- --runInBand` e executar a integracao com `RUN_DB_TESTS=true` e PostgreSQL disponivel.
+- [ ] `npm test -- --runInBand` e `npm run test:integration` com PostgreSQL disponível.
 - [ ] `npm run lint`.
 - [ ] `npm run db:migrate` em banco vazio e num clone anonimizando da base existente.
 - [ ] Testar login, logout, refresh, reset de senha, bloqueio de conta e expiracao de codigos.

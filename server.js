@@ -31,9 +31,13 @@ const registerAdminRoutes = require('./routes/admin');
 const registerProvasRoutes = require('./routes/provas');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 const isProd = process.env.NODE_ENV === 'production';
 let httpServer;
+
+if (process.env.OPENROUTER_MODEL) {
+  logger.warn({ modelo: process.env.OPENROUTER_MODEL }, 'OpenRouter configurado com modelo de IA');
+}
 
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
@@ -45,8 +49,8 @@ app.use(
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", 'https://cdn.jsdelivr.net'],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:', 'blob:'],
-        connectSrc: ["'self'"],
+        imgSrc: ["'self'", 'data:', 'blob:', 'https://images.unsplash.com'],
+        connectSrc: ["'self'", 'https://cdn.jsdelivr.net'],
         fontSrc: ["'self'", 'data:'],
         objectSrc: ["'none'"],
         frameAncestors: ["'none'"],
@@ -230,10 +234,23 @@ async function startServer(port = PORT) {
     return httpServer;
   }
 
-  return new Promise((resolve) => {
-    httpServer = app.listen(port, () => {
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port);
+    let started = false;
+    httpServer = server;
+
+    server.once('listening', () => {
+      started = true;
       logger.info(`Servidor rodando na porta ${port}`);
-      resolve(httpServer);
+      resolve(server);
+    });
+    server.on('error', err => {
+      if (!started) {
+        httpServer = null;
+        reject(err);
+        return;
+      }
+      logger.error({ err }, 'Erro no servidor HTTP');
     });
   });
 }

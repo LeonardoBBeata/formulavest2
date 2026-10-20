@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">FórmulaVest</title>
+  <rect width="128" height="128" rx="28" fill="#176454"/>
+  <path d="M24 36c15-5 29-3 40 6v53c-11-9-25-11-40-6V36Z" fill="#f4f6f1"/>
+  <path d="M104 36c-15-5-29-3-40 6v53c11-9 25-11 40-6V36Z" fill="#e9efe9"/>
+  <path d="M33 70h10l8-11 9 13 12-22 8 10h15" fill="none" stroke="#e86f55" stroke-linecap="round" stroke-linejoin="round" stroke-width="7"/>
+  <circle cx="95" cy="60" r="5" fill="#e5ad40"/>
+</svg>

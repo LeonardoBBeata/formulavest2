@@ -1,6 +1,25 @@
 const API = window.location.origin;
-const token = null;
+const token = (() => {
+  try {
+    return localStorage.getItem('access_token');
+  } catch (error) {
+    return null;
+  }
+})();
 let provaSalva = null;
+
+function apiFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  return fetch(url, {
+    credentials: 'same-origin',
+    ...options,
+    headers
+  });
+}
 
 try {
   provaSalva = JSON.parse(sessionStorage.getItem('provaAtual') || 'null');
@@ -122,12 +141,9 @@ async function responderPergunta(resposta) {
   };
 
   try {
-    await fetch(`${API}/provas-prontas/${provaSalva.id}/responder`, {
+    await apiFetch(`${API}/provas-prontas/${provaSalva.id}/responder`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
   } catch (error) {
@@ -156,12 +172,9 @@ async function finalizar() {
   }
 
   try {
-    const res = await fetch(`${API}/provas-prontas/${provaSalva.id}/finalizar`, {
+    const res = await apiFetch(`${API}/provas-prontas/${provaSalva.id}/finalizar`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ respostas: payload })
     });
 
@@ -174,6 +187,7 @@ async function finalizar() {
     if (texto) texto.textContent = 'Prova finalizada';
 
     if (container) container.classList.add('hidden');
+    sessionStorage.removeItem('provaAtual');
     mostrarConclusao(data);
     await verificarNovasConquistas();
   } catch (error) {
@@ -184,9 +198,7 @@ async function finalizar() {
 
 async function verificarNovasConquistas() {
   try {
-    const res = await fetch(`${API}/me/conquistas`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await apiFetch(`${API}/me/conquistas`);
     if (!res.ok) return;
     const data = await res.json();
     const novas = Array.isArray(data.novas_conquistas) ? data.novas_conquistas : [];
@@ -251,6 +263,10 @@ function mostrarConclusao(data) {
     window.location.href = '/prova-codigo.html';
   });
 }
+
+window.addEventListener('beforeunload', () => {
+  sessionStorage.removeItem('provaAtual');
+});
 
 document.addEventListener('DOMContentLoaded', () => {
   el('titulo-prova').textContent = provaSalva?.titulo || 'Prova';

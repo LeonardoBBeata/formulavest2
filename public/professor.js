@@ -1,6 +1,25 @@
 const API = window.location.origin;
-const token = null;
+const token = (() => {
+  try {
+    return localStorage.getItem('access_token');
+  } catch (error) {
+    return null;
+  }
+})();
 const hasSession = localStorage.getItem('auth_session') === '1';
+
+function apiFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  return fetch(url, {
+    credentials: 'same-origin',
+    ...options,
+    headers
+  });
+}
 
 if (!hasSession) {
   window.location.href = '/login.html';
@@ -22,9 +41,7 @@ async function verificarAcessoProfessor() {
   }
 
   try {
-    const res = await fetch(`${API}/me`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await apiFetch(`${API}/me`);
 
     if (!res.ok) {
       window.location.href = '/index.html';
@@ -54,17 +71,21 @@ let salasSelectEl = null;
 
 function el(id) { return document.getElementById(id); }
 
+function abrirSecaoProfessor(sectionId) {
+  document.querySelectorAll('.menu-btn, .tab-btn').forEach((button) => {
+    button.classList.toggle('active', button.dataset.section === sectionId);
+  });
+  document.querySelectorAll('.page-section').forEach((section) => section.classList.add('hidden'));
+  el(sectionId)?.classList.remove('hidden');
+}
+
 function mostrarMensagem(texto) {
   const pill = el('status-pill');
   if (pill) pill.textContent = texto;
 }
 
 function abrirSessaoAoVivo() {
-  document.querySelectorAll('.menu-btn').forEach((button) => {
-    button.classList.toggle('active', button.dataset.section === 'ao-vivo');
-  });
-  document.querySelectorAll('.page-section').forEach((section) => section.classList.add('hidden'));
-  el('ao-vivo')?.classList.remove('hidden');
+  abrirSecaoProfessor('ao-vivo');
 }
 
 function preencherQuestaoNoCard(card, questao) {
@@ -386,14 +407,13 @@ function renderTurmas(salas) {
   if (!container) return;
 
   if (!salas || salas.length === 0) {
-    container.innerHTML = '<p class="small">Nenhuma sala atribuída.</p>';
+    container.innerHTML = '<div class="empty-state"><strong>Nenhuma sala atribuída</strong><p>Peça ao administrador para vincular sua conta a uma sala. A turma aparecerá aqui depois da atribuição.</p></div>';
     return;
   }
 
   container.innerHTML = salas.map((sala) => `
     <div class="turma-card">
-      <strong>${escapeHtml(sala.periodo_nome || '')} — ${escapeHtml(sala.nome)}</strong>
-      <span class="small">Sala ID ${Number(sala.id)}</span>
+      <strong>${escapeHtml([sala.empresa_nome, sala.escola_nome, sala.periodo_nome, sala.nome].filter(Boolean).join(' — '))}</strong>
     </div>
   `).join('');
 }
@@ -471,9 +491,7 @@ function mostrarRespostaCorreta() {
 async function carregarPlacar() {
   if (!activeSession?.prova?.id) return;
   try {
-    const res = await fetch(`${API}/professor/provas/${activeSession.prova.id}/placar`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await apiFetch(`${API}/professor/provas/${activeSession.prova.id}/placar`);
     const data = await res.json();
 
     const ranking = el('ranking-live');
@@ -497,16 +515,15 @@ async function carregarPlacar() {
 
 async function carregarProvas() {
   try {
-    const res = await fetch(`${API}/professor/provas`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const res = await apiFetch(`${API}/professor/provas`);
     const data = await res.json();
 
     const container = el('provas-list');
     if (!container) return;
 
     if (!data.provas || data.provas.length === 0) {
-      container.innerHTML = '<p class="small">Nenhuma prova criada ainda.</p>';
+      container.innerHTML = '<div class="empty-state"><strong>Você ainda não criou provas</strong><p>Monte uma prova para sua turma e acompanhe as respostas ao vivo.</p><button class="btn btn-primary small" type="button" data-open-section="nova-prova">Criar primeira prova</button></div>';
+      container.querySelector('[data-open-section]')?.addEventListener('click', () => abrirSecaoProfessor('nova-prova'));
       return;
     }
 
@@ -528,9 +545,8 @@ async function carregarProvas() {
     container.querySelectorAll('[data-iniciar]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const id = btn.getAttribute('data-iniciar');
-        const res = await fetch(`${API}/professor/provas/${id}/iniciar`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` }
+        const res = await apiFetch(`${API}/professor/provas/${id}/iniciar`, {
+          method: 'POST'
         });
         const data = await res.json();
         if (data.ok) {
@@ -552,7 +568,7 @@ async function carregarProvas() {
       btn.addEventListener('click', async () => {
         const id = btn.getAttribute('data-encerrar');
         if (!confirm('Encerrar transmissão dessa prova?')) return;
-        const res = await fetch(`${API}/professor/provas/${id}/encerrar`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+        const res = await apiFetch(`${API}/professor/provas/${id}/encerrar`, { method: 'POST' });
         const data = await res.json();
         if (data.ok) {
           mostrarMensagem('Transmissão encerrada');
@@ -570,9 +586,7 @@ async function carregarProvas() {
         const textoOriginal = btn.textContent;
         btn.textContent = 'Gerando...';
         try {
-          const res = await fetch(`${API}/professor/provas/${id}/pdf`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
+          const res = await apiFetch(`${API}/professor/provas/${id}/pdf`);
           if (!res.ok) {
             const data = await res.json().catch(() => ({}));
             throw new Error(data.error || 'Erro ao gerar PDF da prova');
@@ -603,9 +617,7 @@ async function carregarProvas() {
         const textoOriginal = btn.textContent;
         btn.textContent = 'Gerando...';
         try {
-          const res = await fetch(`${API}/professor/provas/${id}/xls`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
+          const res = await apiFetch(`${API}/professor/provas/${id}/xls`);
           if (!res.ok) {
             const data = await res.json().catch(() => ({}));
             throw new Error(data.error || 'Erro ao gerar planilha da prova');
@@ -651,7 +663,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     try {
-      const res = await fetch(`${API}/professor/provas/${activeSession.prova.id}/xls`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await apiFetch(`${API}/professor/provas/${activeSession.prova.id}/xls`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || 'Erro ao gerar relatório XLS');
@@ -683,10 +695,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     button.addEventListener('click', () => {
       const section = button.dataset.section;
       if (!section) return;
-      document.querySelectorAll('.menu-btn, .tab-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.section === section));
-      document.querySelectorAll('.page-section').forEach((sectionEl) => sectionEl.classList.add('hidden'));
-      const target = document.getElementById(section);
-      if (target) target.classList.remove('hidden');
+      abrirSecaoProfessor(section);
     });
   });
 
@@ -743,6 +752,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     const periodosData = await periodosRes.json();
     const salasData = await salasRes.json();
 
+    if (!periodosRes.ok || !salasRes.ok) {
+      throw new Error(periodosData.error || salasData.error || 'Não foi possível carregar suas turmas. Confira as permissões da conta.');
+    }
+
     periodosSelectEl = el('periodos-select');
     salasSelectEl = el('salas-select');
     const provaSalaSelect = el('prova-sala-select');
@@ -755,7 +768,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         ? salas.filter((sala) => String(sala.periodo_id) === String(selectedPeriodo))
         : salas;
 
-      salasSelectEl.innerHTML = visibleSalas.map((s) => `<option value="${s.id}">${s.periodo_nome} — ${s.nome}</option>`).join('');
+      salasSelectEl.innerHTML = visibleSalas.map((s) => `<option value="${s.id}">${escapeHtml([s.empresa_nome, s.escola_nome, s.periodo_nome, s.nome].filter(Boolean).join(' — '))}</option>`).join('');
+      if (!visibleSalas.length) salasSelectEl.innerHTML = '<option value="">Nenhuma sala neste período</option>';
+      salasSelectEl.disabled = !visibleSalas.length;
       renderTurmas(visibleSalas);
     };
 
@@ -763,11 +778,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!provaSalaSelect) return;
       provaSalaSelect.innerHTML = `
         <option value="">Selecione uma sala</option>
-        ${salas.map((s) => `<option value="${s.id}">${escapeHtml(s.periodo_nome)} — ${escapeHtml(s.nome)}</option>`).join('')}
+        ${salas.map((s) => `<option value="${s.id}">${escapeHtml([s.empresa_nome, s.escola_nome, s.periodo_nome, s.nome].filter(Boolean).join(' — '))}</option>`).join('')}
       `;
+      provaSalaSelect.disabled = !salas.length;
+      if (!salas.length) provaSalaSelect.innerHTML = '<option value="">Nenhuma sala atribuída</option>';
     };
 
-    periodosSelectEl.innerHTML = `<option value="">Todos os períodos</option>${periodos.map(p => `<option value="${p.id}">${escapeHtml(p.nome)}</option>`).join('')}`;
+    periodosSelectEl.innerHTML = periodos.length
+      ? `<option value="">Todos os períodos</option>${periodos.map(p => `<option value="${p.id}">${escapeHtml([p.empresa_nome, p.escola_nome, p.nome].filter(Boolean).join(' — '))}</option>`).join('')}`
+      : '<option value="">Nenhum período atribuído</option>';
+    periodosSelectEl.disabled = !periodos.length;
+    const criarSalaBtn = el('criar-sala-btn');
+    if (criarSalaBtn) criarSalaBtn.disabled = !periodos.length;
     updateSalas();
     updateProvaSalaOptions();
     periodosSelectEl.addEventListener('change', updateSalas);
@@ -845,6 +867,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   } catch (err) {
     console.error('Erro carregar turmas', err);
+    mostrarMensagem(err.message || 'Erro ao carregar turmas');
+    const container = el('turmas-container');
+    if (container) container.innerHTML = `<p class="small" role="alert">${escapeHtml(err.message || 'Não foi possível carregar suas turmas.')}</p>`;
   }
 
   el('logout-btn')?.addEventListener('click', async () => {

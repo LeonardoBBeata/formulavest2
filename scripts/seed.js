@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
@@ -8,8 +10,7 @@ const pool = new Pool({ connectionString });
 async function run() {
   const seedsDir = path.join(__dirname, '..', 'seeds');
   if (!fs.existsSync(seedsDir)) {
-    console.error('No seeds directory found:', seedsDir);
-    process.exit(1);
+    throw new Error(`No seeds directory found: ${seedsDir}`);
   }
 
   const files = fs.readdirSync(seedsDir)
@@ -20,49 +21,98 @@ async function run() {
     const full = path.join(seedsDir, file);
     const sql = fs.readFileSync(full, 'utf8');
     console.log('Seeding', file);
-    try {
-      await pool.query(sql);
-    } catch (err) {
-      console.error('Seed failed:', file, err.message);
-      process.exit(1);
-    }
+    await pool.query(sql);
   }
 
-  console.log('Seeds applied');
-
-  // ensure default admin and professor users exist with known password
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     const bcrypt = require('bcrypt');
-    const pwd = '12345678';
-    const hash = await bcrypt.hash(pwd, 10);
+    const empresaResult = await client.query(
+      'SELECT id FROM empresas WHERE LOWER(nome) = LOWER($1) ORDER BY id LIMIT 1',
+      ['FormulaVest']
+    );
+    const empresaId = empresaResult.rows[0]?.id;
+    if (!empresaId) throw new Error('Empresa FormulaVest não encontrada');
 
-    // ensure there is at least one company
-    const empRes = await pool.query('SELECT id FROM empresas LIMIT 1');
-    const empresaId = empRes.rows[0]?.id || null;
+    const masterResult = await client.query('SELECT id FROM usuarios WHERE email = $1', ['adm@formulavest.com']);
+    if (!masterResult.rows.length) {
+      if (!process.env.MASTER_PASSWORD) throw new Error('Defina MASTER_PASSWORD para criar a conta master');
+      const masterHash = await bcrypt.hash(process.env.MASTER_PASSWORD, 10);
+      await client.query(`
+        INSERT INTO usuarios (username, email, senha, role, empresa_id, verificado)
+        VALUES ($1, $2, $3, $4, $5, TRUE)
+      `, ['ADM', 'adm@formulavest.com', masterHash, 'formulavest_master', empresaId]);
+    }
 
-    // upsert admin
-    await pool.query(`
-      INSERT INTO usuarios (username, email, senha, role, empresa_id, verificado)
-      VALUES ($1,$2,$3,$4,$5,TRUE)
-      ON CONFLICT (email) DO UPDATE SET senha = EXCLUDED.senha, role = EXCLUDED.role, verificado = TRUE
-    `, ['ADM', 'adm@formulavest.com', hash, 'formulavest_master', empresaId]);
+    const escolaResult = await client.query(
+      'SELECT id FROM escolas WHERE empresa_id = $1 AND LOWER(nome) = LOWER($2) ORDER BY id LIMIT 1',
+      [empresaId, 'Escola FórmulaVest']
+    );
+    const escolaId = escolaResult.rows[0]?.id || (await client.query(
+      'INSERT INTO escolas (empresa_id, nome) VALUES ($1, $2) RETURNING id',
+      [empresaId, 'Escola FórmulaVest']
+    )).rows[0].id;
 
-    // upsert professor
-    await pool.query(`
-      INSERT INTO usuarios (username, email, senha, role, empresa_id, verificado)
-      VALUES ($1,$2,$3,$4,$5,TRUE)
-      ON CONFLICT (email) DO UPDATE SET senha = EXCLUDED.senha, role = EXCLUDED.role, verificado = TRUE
-    `, ['PROF', 'prof@formulavest.com', hash, 'professor', empresaId]);
+    const periodoResult = await client.query(
+      'SELECT id FROM periodos WHERE escola_id = $1 AND LOWER(nome) = LOWER($2) ORDER BY id LIMIT 1',
+      [escolaId, 'Manhã']
+    );
+    const periodoId = periodoResult.rows[0]?.id || (await client.query(
+      'INSERT INTO periodos (escola_id, nome) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id',
+      [escolaId, 'Manhã']
+    )).rows[0]?.id || (await client.query(
+      'SELECT id FROM periodos WHERE escola_id = $1 AND LOWER(nome) = LOWER($2)',
+      [escolaId, 'Manhã']
+    )).rows[0].id;
 
-    console.log('Default users ensured: adm@formulavest.com, prof@formulavest.com (password: 12345678)');
+    const salaResult = await client.query(
+      'SELECT id FROM salas WHERE periodo_id = $1 AND LOWER(nome) = LOWER($2) ORDER BY id LIMIT 1',
+      [periodoId, 'Turma A']
+    );
+    const salaId = salaResult.rows[0]?.id || (await client.query(
+      'INSERT INTO salas (periodo_id, nome) VALUES ($1, $2) ON CONFLICT DO NOTHING RETURNING id',
+      [periodoId, 'Turma A']
+    )).rows[0]?.id || (await client.query(
+      'SELECT id FROM salas WHERE periodo_id = $1 AND LOWER(nome) = LOWER($2)',
+      [periodoId, 'Turma A']
+    )).rows[0].id;
+
+    const professorPassword = process.env.PROFESSOR_PASSWORD || (process.env.NODE_ENV === 'production' ? '' : '12345678');
+    if (!professorPassword) throw new Error('Defina PROFESSOR_PASSWORD para criar a conta professor em produção');
+    const professorHash = await bcrypt.hash(professorPassword, 10);
+    const professorResult = await client.query(`
+      INSERT INTO usuarios (username, email, senha, role, empresa_id, escola_id, periodo_id, sala_id, verificado)
+      VALUES ($1, $2, $3, 'professor', $4, $5, $6, $7, TRUE)
+      ON CONFLICT (email) DO UPDATE SET
+        username = EXCLUDED.username,
+        senha = EXCLUDED.senha,
+        role = 'professor',
+        empresa_id = EXCLUDED.empresa_id,
+        escola_id = EXCLUDED.escola_id,
+        periodo_id = EXCLUDED.periodo_id,
+        sala_id = EXCLUDED.sala_id,
+        verificado = TRUE,
+        banido = FALSE
+      RETURNING id
+    `, ['PROF', 'prof@formulavest.com', professorHash, empresaId, escolaId, periodoId, salaId]);
+
+    await client.query(
+      'INSERT INTO professor_salas (professor_id, sala_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [professorResult.rows[0].id, salaId]
+    );
+    await client.query('COMMIT');
+    console.log('Seed pronto: master preservado; professor associado a Escola FórmulaVest / Manhã / Turma A.');
   } catch (err) {
-    console.error('Error ensuring default users', err.message || err);
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+    await pool.end();
   }
-
-  await pool.end();
 }
 
 run().catch(err => {
   console.error(err);
-  process.exit(1);
+  process.exitCode = 1;
 });

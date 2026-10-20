@@ -4,15 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FormulaVest | Admin</title>
-  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/admin.css" />
+  <link rel="stylesheet" href="/site-theme.css" />
   <script src="/admin.js" defer></script>
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
       <a class="brand-block" href="/">
-        <span class="brand-icon">FV</span>
+        <img class="brand-mark" src="/logo-mark.svg" alt="" width="48" height="48" />
         <span>
           <strong>FormulaVest</strong>
           <small>Painel administrativo</small>
@@ -147,6 +148,12 @@
                   <option value="empresa_admin">Admin da empresa</option>
                 </select>
               </label>
+              <label id="campoNovoEmpresa" class="hidden">
+                <span>Empresa</span>
+                <select id="novoEmpresa">
+                  <option value="">Selecione a empresa</option>
+                </select>
+              </label>
               <label>
                 <span>Escola</span>
                 <select id="novoEscola">
@@ -156,9 +163,10 @@
               <label>
                 <span>Sala</span>
                 <select id="novoSala">
-                  <option value="">Sem sala</option>
+                  <option value="">Selecione uma escola primeiro</option>
                 </select>
               </label>
+              <p class="help-text field-wide" id="novoUsuarioHierarquiaAjuda" role="status">Selecione empresa, escola e sala para vincular a conta à estrutura correta.</p>
               <div class="form-actions">
                 <button class="btn btn-primary" type="submit">Criar usuario</button>
               </div>
@@ -183,16 +191,21 @@
               </label>
               <label>
                 <span>Senha</span>
-                <input id="alunoSenha" type="password" placeholder="Opcional" minlength="8" />
+                <input id="alunoSenha" type="password" autocomplete="new-password" placeholder="Opcional" minlength="8" />
+              </label>
+              <label>
+                <span>Escola</span>
+                <select id="alunoEscola" required></select>
               </label>
               <label>
                 <span>Periodo</span>
-                <select id="alunoPeriodo" required></select>
+                <select id="alunoPeriodo" required disabled></select>
               </label>
               <label>
                 <span>Sala</span>
-                <select id="alunoSala" required></select>
+                <select id="alunoSala" required disabled></select>
               </label>
+              <p class="help-text field-wide" id="alunoHierarquiaAjuda" role="status">Escolha uma escola para carregar os períodos e salas disponíveis.</p>
               <div class="form-actions">
                 <button class="btn btn-primary" type="submit">Criar aluno</button>
               </div>
@@ -211,7 +224,7 @@
                 <span>Arquivo CSV</span>
                 <input id="arquivoAlunos" type="file" accept=".csv,text/csv" required />
               </label>
-              <p class="help-text">Use colunas com os nomes: nome do aluno, sala, periodo, email e senha. A primeira linha é lida como cabeçalho.</p>
+              <p class="help-text">Colunas: nome, escola, periodo, sala, email e senha. Para escolas homônimas, inclua também a empresa. A primeira linha é o cabeçalho.</p>
               <div class="form-actions">
                 <button class="btn btn-secondary" type="submit">Importar alunos</button>
               </div>
@@ -226,8 +239,40 @@
               </div>
               <span class="pill" id="usuarios-count">0 contas</span>
             </div>
-            <div class="toolbar">
+            <div class="toolbar filter-toolbar">
+              <div class="filter-chip-group" aria-label="Filtros rápidos de usuários">
+                <button type="button" class="filter-chip active" data-user-fast-filter="todos">Todos</button>
+                <button type="button" class="filter-chip" data-user-fast-filter="ativos">Ativos</button>
+                <button type="button" class="filter-chip" data-user-fast-filter="banidos">Banidos</button>
+              </div>
               <input id="buscaUsuarios" type="search" placeholder="Buscar por nome, email ou funcao" />
+              <select id="filtroUsuariosRole">
+                <option value="todos">Todas as funções</option>
+                <option value="aluno">Aluno</option>
+                <option value="professor">Professor</option>
+                <option value="coordenador">Coordenador</option>
+                <option value="diretor">Diretor</option>
+                <option value="empresa_admin">Admin da empresa</option>
+              </select>
+              <select id="filtroUsuariosStatus">
+                <option value="todos">Qualquer status</option>
+                <option value="ativos">Ativos</option>
+                <option value="banidos">Banidos</option>
+              </select>
+              <select id="filtroUsuariosEmpresa">
+                <option value="todos">Todas as empresas</option>
+              </select>
+              <select id="filtroUsuariosEscola">
+                <option value="todos">Todas as escolas</option>
+              </select>
+              <select id="usuariosOrdenacao" aria-label="Ordenar usuários">
+                <option value="nome_az">Nome A–Z</option>
+                <option value="nome_za">Nome Z–A</option>
+                <option value="empresa">Empresa</option>
+                <option value="status">Status</option>
+              </select>
+              <button type="button" class="btn btn-secondary btn-small" data-export-users>Exportar CSV</button>
+              <button type="button" class="btn btn-secondary btn-small" data-clear-users-filters>Limpar filtros</button>
             </div>
             <div id="listaUsuarios" class="list-stack"></div>
           </div>
@@ -243,14 +288,39 @@
             </div>
             <span class="pill" id="professores-count">0 professores</span>
           </div>
-          <div class="toolbar">
+          <div class="toolbar filter-toolbar">
+            <div class="filter-chip-group" aria-label="Filtros rápidos de professores">
+              <button type="button" class="filter-chip active" data-professor-fast-filter="todos">Todos</button>
+              <button type="button" class="filter-chip" data-professor-fast-filter="ativos">Ativos</button>
+              <button type="button" class="filter-chip" data-professor-fast-filter="banidos">Banidos</button>
+            </div>
             <input id="buscaProfessores" type="search" placeholder="Buscar por nome, email ou sala" />
+            <select id="filtroProfessorEmpresa">
+              <option value="todos">Todas as empresas</option>
+            </select>
+            <select id="filtroProfessorEscola">
+              <option value="todos">Todas as escolas</option>
+            </select>
+            <select id="filtroProfessorStatus">
+              <option value="todos">Qualquer status</option>
+              <option value="ativos">Ativos</option>
+              <option value="banidos">Banidos</option>
+            </select>
+            <select id="professoresOrdenacao" aria-label="Ordenar professores">
+              <option value="nome_az">Nome A–Z</option>
+              <option value="nome_za">Nome Z–A</option>
+              <option value="empresa">Empresa</option>
+              <option value="status">Status</option>
+            </select>
+            <button type="button" class="btn btn-secondary btn-small" data-export-professors>Exportar CSV</button>
+            <button type="button" class="btn btn-secondary btn-small" data-clear-professors-filters>Limpar filtros</button>
           </div>
           <div id="listaProfessores" class="list-stack"></div>
         </div>
       </section>
 
       <section id="estrutura" class="pagina hidden" data-title="Estrutura">
+        <p class="help-text">A organização segue esta ordem: Empresa → Escola → Período → Sala. Escolha o item pai para carregar as opções dependentes.</p>
         <div class="structure-grid">
           <div class="card form-card">
             <div class="section-title">
@@ -260,6 +330,10 @@
               </div>
             </div>
             <form id="form-criar-escola" class="compact-form">
+              <label id="campoEmpresaEscola" class="hidden">
+                <span>Empresa</span>
+                <select id="empresaEscola" required></select>
+              </label>
               <label>
                 <span>Nome da escola</span>
                 <input id="nomeEscola" required minlength="2" />
@@ -395,7 +469,7 @@
             </label>
             <label>
               <span>Senha</span>
-              <input id="adminSenha" type="password" required minlength="8" />
+              <input id="adminSenha" type="password" autocomplete="new-password" required minlength="8" />
             </label>
             <label>
               <span>Empresa</span>

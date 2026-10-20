@@ -7,12 +7,16 @@ const jwtOptions = {
   audience: 'formulavest-web'
 };
 
+function normalizeUserRole(role) {
+  return typeof role === 'string' && role.trim() ? role.trim() : 'aluno';
+}
+
 function gerarToken(user) {
   return jwt.sign(
     {
       id: user.id,
       username: user.username,
-      role: user.role,
+      role: normalizeUserRole(user.role),
       empresa_id: user.empresa_id,
       escola_id: user.escola_id,
       sala_id: user.sala_id,
@@ -70,7 +74,12 @@ async function auth(req, res, next) {
     if (!user || user.banido || !user.verificado || Number(payload.token_version || 0) !== Number(user.token_version || 0)) {
       return res.status(401).json({ error: 'Sessao invalida' });
     }
-    req.user = user;
+
+    if (!user.role) {
+      await db.query(`UPDATE usuarios SET role = 'aluno' WHERE id = $1`, [user.id]);
+    }
+
+    req.user = { ...user, role: normalizeUserRole(user.role) };
     next();
   } catch {
     return res.status(401).json({
@@ -82,5 +91,6 @@ async function auth(req, res, next) {
 module.exports = {
   auth,
   gerarToken,
-  permitir
+  permitir,
+  normalizeUserRole
 };

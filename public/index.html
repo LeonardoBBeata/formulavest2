@@ -4,8 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FórmulaVest</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
 
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="site-theme.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="script.js" defer></script>
 
@@ -60,7 +62,7 @@
   <!-- SIDEBAR -->
   <aside class="sidebar">
     <div class="brand-block">
-      <div class="brand-icon">📚</div>
+      <img class="brand-mark" src="/logo-mark.svg" alt="" width="46" height="46">
       <div>
         <h2>FórmulaVest</h2>
         <p>Plataforma de estudos</p>
@@ -73,9 +75,11 @@
       <li data-section="inicio" class="active">🏠 Início</li>
       <li data-section="enem">🧠 Simulado ENEM</li>
       <li data-section="provao">📘 Provão Paulista</li>
+      <li data-section="personalizadas">🎯 Provas personalizadas</li>
       <li data-section="conquistas">🎖️ Conquistas</li>
       <li data-section="estatisticas">📊 Estatísticas</li>
       <li data-section="ranking">🏆 Ranking</li>
+      <li data-section="configuracoes">⚙️ Configurações</li>
       <li data-section="redacao">✍️ Redação</li>
       <li id="link-professor" class="hidden"><a href="/professor.html" style="color: inherit; text-decoration: none; display: block;">🎓 Tela do professor</a></li>
     </ul>
@@ -167,15 +171,15 @@
           <div class="progress-list">
             <div class="progress-item">
               <div class="progress-meta"><span>Matemática</span><span id="prog-matematica">0%</span></div>
-              <div class="progress-bar"><div id="fill-matematica" class="progress-fill"></div></div>
+              <div class="progress-bar"><div id="fill-matematica" class="progress-fill" role="progressbar" aria-label="Progresso em Matemática" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div>
             </div>
             <div class="progress-item">
               <div class="progress-meta"><span>Português</span><span id="prog-portugues">0%</span></div>
-              <div class="progress-bar"><div id="fill-portugues" class="progress-fill"></div></div>
+              <div class="progress-bar"><div id="fill-portugues" class="progress-fill" role="progressbar" aria-label="Progresso em Português" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div>
             </div>
             <div class="progress-item">
               <div class="progress-meta"><span>Redação</span><span id="prog-redacao">0%</span></div>
-              <div class="progress-bar"><div id="fill-redacao" class="progress-fill"></div></div>
+              <div class="progress-bar"><div id="fill-redacao" class="progress-fill" role="progressbar" aria-label="Progresso em Redação" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div>
             </div>
           </div>
         </div>
@@ -198,6 +202,7 @@
       <h1>📘 Simulado ENEM</h1>
 
       <div class="card">
+        <p style="margin:0 0 12px; color:#5b6475; font-size:14px;">ENEM: 90 questões em 9 blocos de 10</p>
         <button id="gerar-enem-btn">Gerar ENEM</button>
       </div>
 
@@ -213,6 +218,7 @@
       <h1>📗 Provão Paulista</h1>
 
       <div class="card">
+        <p style="margin:0 0 12px; color:#5b6475; font-size:14px;">Provão Paulista: 90 questões em 9 blocos de 10</p>
         <button id="gerar-provao-btn">Gerar Provão</button>
       </div>
 
@@ -221,6 +227,36 @@
       <button id="finalizar-provao-btn" class="hidden">
         Finalizar Provão
       </button>
+    </section>
+
+    <!-- PROVAS PERSONALIZADAS -->
+    <section id="personalizadas" class="section hidden">
+      <h1>🎯 Provas personalizadas</h1>
+      <div class="card">
+        <div class="section-title">
+          <h3>Criar prova sob medida</h3>
+          <span class="pill">Defina quantas questões você quer</span>
+        </div>
+        <div class="study-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 16px;">
+          <label style="display:flex; flex-direction:column; gap:8px; font-weight:600;">
+            Curso
+            <input id="curso-personalizado" type="text" placeholder="Ex: Direito" />
+          </label>
+          <label style="display:flex; flex-direction:column; gap:8px; font-weight:600;">
+            Faculdade
+            <input id="faculdade-personalizado" type="text" placeholder="Ex: USP" />
+          </label>
+          <label style="display:flex; flex-direction:column; gap:8px; font-weight:600;">
+            Quantidade de questões
+            <input id="quantidade-personalizada" type="number" min="1" max="50" value="10" />
+          </label>
+        </div>
+        <div style="margin-top: 18px;">
+          <button id="gerar-personalizada-btn" type="button">Gerar prova</button>
+        </div>
+      </div>
+      <div id="personalizada-container"></div>
+      <button id="finalizar-personalizada-btn" class="hidden">Finalizar prova</button>
     </section>
 
     <!-- ESTATÍSTICAS -->
@@ -275,6 +311,12 @@
       <canvas id="graficoEvolucao"></canvas>
     </section>
 
+    <!-- CONQUISTAS -->
+    <section id="conquistas" class="section hidden">
+      <h1>🎖️ Conquistas</h1>
+      <div id="conquistas-container"></div>
+    </section>
+
     <!-- RANKING -->
     <section id="ranking" class="section hidden">
       <h1>🏆 Ranking</h1>
@@ -293,6 +335,54 @@
       <button id="enviar-redacao">Corrigir redação</button>
 
       <div id="feedback-redacao"></div>
+    </section>
+
+    <section id="configuracoes" class="section hidden" aria-labelledby="configuracoes-title">
+      <header class="settings-page-header">
+        <p class="eyebrow">Preferências</p>
+        <h1 id="configuracoes-title">Configurações</h1>
+        <p>Escolha como o FórmulaVest aparece e responde neste dispositivo.</p>
+      </header>
+
+      <div class="settings-list">
+        <section class="card settings-group" aria-labelledby="appearance-title">
+          <div class="settings-preference-row">
+            <div>
+              <h2 id="appearance-title">Aparência</h2>
+              <p>Escolha o modo de cor.</p>
+            </div>
+            <div class="settings-choice" role="group" aria-label="Modo de cor">
+              <button type="button" data-theme-choice="light" aria-pressed="false">Claro</button>
+              <button type="button" data-theme-choice="dark" aria-pressed="false">Escuro</button>
+              <button type="button" data-theme-choice="system" aria-pressed="false">Sistema</button>
+            </div>
+          </div>
+          <div class="settings-preference-row">
+            <div>
+              <h2>Tamanho do texto</h2>
+              <p>Ajuste a leitura sem alterar o conteúdo.</p>
+            </div>
+            <div class="settings-choice settings-text-size" role="group" aria-label="Tamanho do texto">
+              <button type="button" data-font-scale="small" aria-label="Texto pequeno" aria-pressed="false">A−</button>
+              <button type="button" data-font-scale="normal" aria-label="Texto padrão" aria-pressed="false">A</button>
+              <button type="button" data-font-scale="large" aria-label="Texto grande" aria-pressed="false">A+</button>
+            </div>
+          </div>
+          <label class="settings-preference-row settings-toggle-row" for="pref-reduced-motion">
+            <span><strong>Reduzir animações</strong><small>Usar menos movimento nas transições.</small></span>
+            <input id="pref-reduced-motion" type="checkbox">
+          </label>
+        </section>
+
+        <section class="card settings-group" aria-labelledby="reminders-title">
+          <div class="settings-preference-row settings-toggle-row">
+            <span><strong id="reminders-title">Lembretes</strong><small>Receba lembretes para manter sua rotina de estudos.</small></span>
+            <input id="pref-notifications" type="checkbox" aria-label="Ativar lembretes">
+          </div>
+        </section>
+
+        <p class="settings-saved" id="settings-saved" role="status" aria-live="polite">As preferências são salvas neste dispositivo.</p>
+      </div>
     </section>
 
   </main>

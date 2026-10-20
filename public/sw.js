@@ -1,4 +1,4 @@
-const CACHE_NAME = 'formulavest-v5';
+const CACHE_NAME = 'formulavest-v6';
 const SHELL_ASSETS = [
   '/',
   '/landing.html',
@@ -26,16 +26,11 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const requestUrl = new URL(event.request.url);
 
-  // Nunca armazene chamadas de API ou páginas autenticadas. Cachear /me, painéis
-  // ou arquivos JS indiscriminadamente fazia a aplicação reaproveitar sessões e
-  // versões antigas do front-end.
+  // Only the explicit offline shell is intercepted; dynamic routes stay network-only.
   if (
     event.request.method !== 'GET' ||
     requestUrl.origin !== self.location.origin ||
-    requestUrl.pathname.startsWith('/admin') ||
-    requestUrl.pathname.startsWith('/professor') ||
-    requestUrl.pathname.startsWith('/me') ||
-    requestUrl.pathname.startsWith('/provas')
+    !SHELL_ASSETS.includes(requestUrl.pathname)
   ) {
     return;
   }
@@ -50,8 +45,11 @@ self.addEventListener('fetch', event => {
         return response;
       })
       .catch(async () => {
-        const cached = await caches.match(event.request);
-        return cached || (await caches.match('/landing.html'));
+        return (await caches.match(event.request)) || new Response('Offline', {
+          status: 503,
+          statusText: 'Offline',
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+        });
       })
   );
 });

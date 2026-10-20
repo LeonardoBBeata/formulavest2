@@ -1,6 +1,25 @@
 const API = window.location.origin;
 const token = null;
 
+function getLocalAchievementState() {
+  const provas = Number(localStorage.getItem('provasConcluidas') || 0);
+  const streak = Number(localStorage.getItem('streak') || 0);
+
+  return {
+    primeira_prova: provas >= 1,
+    tres_provas: provas >= 3,
+    dez_provas: provas >= 10,
+    cinquenta_provas: provas >= 50,
+    prova_perfeita: Boolean(localStorage.getItem('ultimaProvaPerfeita') === '1'),
+    xp_100: Number(localStorage.getItem('xpTotal') || 0) >= 100,
+    nivel_5: Number(localStorage.getItem('nivelAtual') || 0) >= 5,
+    nivel_10: Number(localStorage.getItem('nivelAtual') || 0) >= 10,
+    streak_3: streak >= 3,
+    streak_7: streak >= 7,
+    streak_days: streak
+  };
+}
+
 function el(id){return document.getElementById(id);} 
 
 function escapeHtml(value = '') {
@@ -34,10 +53,23 @@ const BADGES = [
 
 async function carregarBadges(){
   try{
-    const res = await fetch(`${API}/me/conquistas`, { headers: { Authorization: `Bearer ${token}` } });
-    if(!res.ok) return;
-    const data = await res.json();
-    const c = data.conquistas || {};
+    const fallback = getLocalAchievementState();
+    const res = await fetch(`${API}/me/conquistas`, {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: 'same-origin'
+    });
+    const data = res.ok ? await res.json() : {};
+    const c = { ...fallback, ...(data.conquistas || {}) };
+    const historico = Array.isArray(data.historico) && data.historico.length ? data.historico : [];
+    if (!Object.values(c).some(Boolean)) {
+      const praticas = Number(localStorage.getItem('provasConcluidas') || 0);
+      if (praticas > 0) {
+        c.primeira_prova = true;
+        c.tres_provas = praticas >= 3;
+        c.dez_provas = praticas >= 10;
+        c.cinquenta_provas = praticas >= 50;
+      }
+    }
     const grid = el('badges-grid');
     grid.innerHTML = '';
     BADGES.forEach(b => {
@@ -55,9 +87,9 @@ async function carregarBadges(){
       `;
         const shareBtn = item.querySelector('.btn-share');
         const detBtn = item.querySelector('.btn-secondary-ghost');
-        shareBtn?.addEventListener('click', (e) => { e.stopPropagation(); shareBadge(b, ok, data.historico || []); });
-        detBtn?.addEventListener('click', (e) => { e.stopPropagation(); mostrarDetalhe(b, ok, data.historico || []); });
-        item.addEventListener('click', ()=> mostrarDetalhe(b, ok, data.historico || []));
+        shareBtn?.addEventListener('click', (e) => { e.stopPropagation(); shareBadge(b, ok, historico); });
+        detBtn?.addEventListener('click', (e) => { e.stopPropagation(); mostrarDetalhe(b, ok, historico); });
+        item.addEventListener('click', ()=> mostrarDetalhe(b, ok, historico));
       grid.appendChild(item);
     });
   }catch(e){console.error('Erro carregar badges', e);}
@@ -162,11 +194,20 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight) {
 
 async function carregarHistorico(){
   try{
-    const res = await fetch(`${API}/me/conquistas/historico`, { headers: { Authorization: `Bearer ${token}` } });
-    if(!res.ok) return el('hist-list').innerText = 'Não foi possível carregar histórico';
-    const data = await res.json();
-    const list = data.historico || [];
-    if (!list.length) return el('hist-list').innerHTML = '<p class="muted">Sem histórico ainda.</p>';
+    const res = await fetch(`${API}/me/conquistas/historico`, {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: 'same-origin'
+    });
+    const data = res.ok ? await res.json() : {};
+    const list = Array.isArray(data.historico) && data.historico.length ? data.historico : [];
+    if (!list.length) {
+      const provas = Number(localStorage.getItem('provasConcluidas') || 0);
+      if (provas > 0) {
+        const html = '<ul class="historic-list"><li><strong>Provas concluídas</strong> — Você concluiu ' + escapeHtml(String(provas)) + ' prova(s) no sistema. <small style="color:#888">(' + escapeHtml(new Date().toLocaleString()) + ')</small></li></ul>';
+        return el('hist-list').innerHTML = html;
+      }
+      return el('hist-list').innerHTML = '<p class="muted">Sem histórico ainda.</p>';
+    }
     const html = '<ul class="historic-list">' + list.map(h => `<li><strong>${escapeHtml(h.titulo)}</strong> — ${escapeHtml(h.descricao)} <small style="color:#888">(${escapeHtml(new Date(h.criado_em).toLocaleString())})</small></li>`).join('') + '</ul>';
     el('hist-list').innerHTML = html;
   }catch(e){ console.error('Erro histórico', e); el('hist-list').innerText = 'Erro ao carregar histórico'; }

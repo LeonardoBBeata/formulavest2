@@ -6,7 +6,10 @@
   <meta name="theme-color" content="#4f8cff">
   <title>FórmulaVest — Estude com foco</title>
   <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/landing.css">
+  <link rel="stylesheet" href="/site-theme.css">
+  <link rel="stylesheet" href="/landing-redesign.css">
   <script src="/pwa.js" defer></script>
   <script src="/landing.js" defer></script>
 </head>
@@ -17,41 +20,32 @@
   <header class="hero-shell">
     <nav class="nav-bar">
       <div class="brand">
-        <span class="brand-icon">📚</span>
+        <img class="brand-mark" src="/logo-mark.svg" alt="" width="40" height="40">
         <span>FórmulaVest</span>
       </div>
       <a class="nav-link" href="/login.html">Entrar</a>
     </nav>
 
-    <section class="hero-card">
+    <section class="hero-card landing-hero">
       <div class="hero-copy">
-        <p class="eyebrow">Uma plataforma para estudar com inteligência</p>
-        <h1>Transforme seu estudo em uma rotina leve, guiada e produtiva.</h1>
-        <p>Simulados, metas, foco, redação e acompanhamento em um ambiente pensado para você evoluir cada dia.</p>
+        <p class="eyebrow">FórmulaVest</p>
+        <h1>Estude com foco. Avance com confiança.</h1>
+        <p>Simulados, redação e progresso num só lugar, para transformar cada sessão em um passo à frente.</p>
         <div class="hero-actions">
-          <a class="btn btn-primary" href="/login.html">Comece agora</a>
-          <a class="btn btn-secondary" href="#benefits">Conheça os recursos</a>
+          <a class="btn btn-primary" href="/login.html">Começar a estudar <span aria-hidden="true">↗</span></a>
+          <a class="btn btn-secondary" href="#benefits">Explorar a plataforma</a>
         </div>
       </div>
 
-      <div class="hero-panel">
+      <div class="hero-panel landing-proof">
         <div class="panel-top">
-          <span>Hoje</span>
-          <strong>+12% de foco</strong>
+          <span>SEU PRÓXIMO PASSO</span>
+          <strong>25 min</strong>
         </div>
         <div class="panel-metrics">
-          <div>
-            <strong>4x</strong>
-            <span>mais organização</span>
-          </div>
-          <div>
-            <strong>25 min</strong>
-            <span>modo foco</span>
-          </div>
-          <div>
-            <strong>7/7</strong>
-            <span>dias de rotina</span>
-          </div>
+          <div><strong>Escolha</strong><span>uma matéria para revisar</span></div>
+          <div><strong>Pratique</strong><span>com questões estilo ENEM</span></div>
+          <div><strong>Acompanhe</strong><span>seu ritmo e evolução</span></div>
         </div>
       </div>
     </section>
@@ -59,8 +53,8 @@
 
   <main id="benefits" class="features-section">
     <section class="section-title">
-      <p class="eyebrow">Por que estudar aqui?</p>
-      <h2>Uma experiência completa para quem quer conquistar aprovação com consistência.</h2>
+      <p class="eyebrow">Ferramentas para continuar avançando</p>
+      <h2>Uma rotina de estudo que cabe no seu dia.</h2>
     </section>
 
     <div class="features-grid">

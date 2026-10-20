@@ -34,4 +34,6 @@ npm run dev
 
 The server checks that the latest required migration is applied and refuses to start against an incomplete schema. For local development, use `DATABASE_SSL=false`; production must use TLS with certificate verification enabled. The master admin is created on startup if `MASTER_PASSWORD` is set.
 
+Run `npm run db:seed` after migrations to create the local professor account and its default school, period, and room. In development, the professor password defaults to `12345678`; set `PROFESSOR_PASSWORD` for another value. Production seeding requires `PROFESSOR_PASSWORD` and never overwrites an existing master's password.
+
 If you prefer to provide individual PG_* variables, set `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD` and `PGDATABASE` instead of `DATABASE_URL`.

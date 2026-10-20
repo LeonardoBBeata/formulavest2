@@ -110,18 +110,20 @@ INSERT INTO usuarios (
   username,
   email,
   senha,
+  role,
   codigo_verificacao,
   codigo_verificacao_expira,
   verificado
 )
-VALUES ($1,$2,$3,$4,NOW() + INTERVAL '10 minutes',FALSE)
+VALUES ($1,$2,$3,$4,$5,NOW() + INTERVAL '10 minutes',FALSE)
 RETURNING id, email
             `,
             [
                 username,
                 email,
-            hash,
-            null
+                hash,
+                'aluno',
+                null
             ]
         );
 

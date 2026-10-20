@@ -6,6 +6,7 @@ const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const ExcelJS = require('exceljs');
 const yauzl = require('yauzl');
+const { buildEnemQuestionPlan, createBatchesOfTen } = require('../utils/examState');
 
 module.exports = function registerProvasRoutes(app, deps = {}) {
   const { PDFDocument, aiLimiter, auth, cache, chamarIA, db, extrairJSONSeguro } = deps;
@@ -56,6 +57,46 @@ function normalizarQuestaoProfessor(questao) {
     opcoes: questao.opcoes || {},
     correta: String(questao.correta || "").trim().toUpperCase()
   };
+}
+
+function validarQuestaoGerada(questao) {
+  if (!questao || typeof questao !== 'object') return false;
+
+  const enunciado = String(questao.enunciado || '').trim();
+  const correta = String(questao.correta || '').trim().toUpperCase();
+  const opcoes = questao.opcoes || {};
+
+  if (!enunciado || !['A', 'B', 'C', 'D', 'E'].includes(correta)) return false;
+  if (!opcoes || typeof opcoes !== 'object') return false;
+
+  const letras = Object.keys(opcoes).map(item => String(item).trim().toUpperCase());
+  const textoValido = Object.values(opcoes).every(item => String(item || '').trim().length > 0);
+  const hasLetters = ['A', 'B', 'C', 'D', 'E'].every(letra => letras.includes(letra) || !!opcoes[letra]);
+
+  if (!textoValido || !hasLetters || !opcoes[correta]) return false;
+  return true;
+}
+
+function normalizarQuestoesGeradas(questoes = []) {
+  const lista = Array.isArray(questoes) ? questoes : [];
+  const validas = lista
+    .map((questao) => {
+      if (!validarQuestaoGerada(questao)) return null;
+      const opcoes = {};
+      ['A', 'B', 'C', 'D', 'E'].forEach((letra) => {
+        opcoes[letra] = String((questao.opcoes || {})[letra] || '').trim();
+      });
+
+      return {
+        enunciado: String(questao.enunciado || '').trim(),
+        materia: String(questao.materia || 'Geral').trim() || 'Geral',
+        opcoes,
+        correta: String(questao.correta || '').trim().toUpperCase()
+      };
+    })
+    .filter(Boolean);
+
+  return validas;
 }
 
 async function extrairTextoDoArquivo(filePath) {
@@ -281,16 +322,21 @@ function canAccessSchool(user, escolaId, empresaId) {
 // ======================
 app.post('/gerar-provao', auth, aiLimiter, async (req, res) => {
   try {
-    const resposta =
-      await chamarIA(`
-Crie uma prova com 10 questões baseada no estilo do Provão Paulista.
+    const totalQuestoes = 90;
+    const lotes = createBatchesOfTen(totalQuestoes, 10);
+    const todasQuestoes = [];
+
+    for (const lote of lotes) {
+      const resposta = await chamarIA(`
+Crie ${lote.size} questões inéditas estilo Provão Paulista em formato de bloco de 10 questões.
+As questões devem ser variadas e consistentes com o nível do ensino médio.
 
 RETORNE SOMENTE JSON:
-
 {
   "questoes":[
     {
       "enunciado":"",
+      "materia":"",
       "opcoes":{
         "A":"",
         "B":"",
@@ -304,49 +350,41 @@ RETORNE SOMENTE JSON:
 }
 `);
 
-    const json =
-      extrairJSONSeguro(
-        resposta
-      );
+      const json = extrairJSONSeguro(resposta);
+      if (!json?.questoes || !Array.isArray(json.questoes) || json.questoes.length === 0) {
+        continue;
+      }
 
-    if (!json?.questoes) {
-      return res.status(500).json({
-        error:
-          "IA inválida"
-      });
+      todasQuestoes.push(...json.questoes.slice(0, lote.size));
     }
 
-    const result =
-      await db.query(`
-        INSERT INTO provas_ativas(
-          usuario_id,
-          questoes
-        )
-        VALUES($1,$2)
-        RETURNING id
-      `, [
-        req.user.id,
-        JSON.stringify(
-          json.questoes
-        )
-      ]);
+    if (todasQuestoes.length < totalQuestoes) {
+      return res.status(500).json({ error: 'Não foi possível completar o Provão Paulista com 90 questões.' });
+    }
 
-    const provaId =
-      result.rows[0].id;
+    const provasFinal = normalizarQuestoesGeradas(todasQuestoes.slice(0, totalQuestoes));
+    if (provasFinal.length < totalQuestoes) {
+      return res.status(500).json({ error: 'O Provão Paulista gerado contém questões inválidas.' });
+    }
+
+    const result = await db.query(`
+      INSERT INTO provas_ativas(usuario_id, questoes)
+      VALUES($1, $2)
+      RETURNING id
+    `, [req.user.id, JSON.stringify(provasFinal)]);
+
+    const provaId = result.rows[0].id;
 
     res.json({
-      prova_id:
-        provaId,
-      questoes:
-        removerGabarito(json.questoes)
+      prova_id: provaId,
+      questoes: removerGabarito(provasFinal)
     });
 
   } catch (err) {
     console.error(err);
 
     res.status(500).json({
-      error:
-        "Erro gerar Provão"
+      error: 'Erro gerar Provão'
     });
   }
 });
@@ -413,15 +451,20 @@ RETORNE SOMENTE JSON VÁLIDO:
 
     // A prova precisa existir no banco antes de ser exibida. Sem este registro o
     // front-end recebia questões, mas não recebia um prova_id para finalizar.
+    const questoesValidas = normalizarQuestoesGeradas(json.questoes);
+    if (questoesValidas.length === 0) {
+      return res.status(500).json({ error: 'A prova personalizada foi gerada com questões inválidas.' });
+    }
+
     const result = await db.query(`
       INSERT INTO provas_ativas(usuario_id, questoes)
       VALUES($1, $2)
       RETURNING id
-    `, [req.user.id, JSON.stringify(json.questoes)]);
+    `, [req.user.id, JSON.stringify(questoesValidas)]);
 
     return res.json({
       prova_id: result.rows[0].id,
-      questoes: removerGabarito(json.questoes)
+      questoes: removerGabarito(questoesValidas)
     });
 
   } catch (err) {
@@ -667,6 +710,11 @@ RETORNE SOMENTE JSON VALIDO:
       return res.status(500).json({ error: "IA retornou formato invalido" });
     }
 
+    const questoesValidas = normalizarQuestoesGeradas(json.questoes);
+    if (questoesValidas.length === 0) {
+      return res.status(500).json({ error: 'IA retornou questões inválidas para a prova.' });
+    }
+
     const result = await db.query(`
       INSERT INTO provas_ativas(
         usuario_id,
@@ -676,12 +724,12 @@ RETORNE SOMENTE JSON VALIDO:
       RETURNING id
     `, [
       req.user.id,
-      JSON.stringify(json.questoes)
+      JSON.stringify(questoesValidas)
     ]);
 
     res.json({
       prova_id: result.rows[0].id,
-      questoes: removerGabarito(json.questoes)
+      questoes: removerGabarito(questoesValidas)
     });
   } catch (err) {
     console.error(err);
@@ -694,21 +742,37 @@ RETORNE SOMENTE JSON VALIDO:
 // ======================
 app.post('/gerar-enem', auth, aiLimiter, async (req, res) => {
   try {
-    let questoes = [];
-    let tentativas = 0;
+    const totalAlvo = 90;
+    const plan = buildEnemQuestionPlan(totalAlvo, 10);
+    const todasQuestoes = [];
+    const materiaLabels = {
+      linguagens: 'Linguagens e Códigos',
+      humanas: 'Ciências Humanas',
+      natureza: 'Ciências da Natureza',
+      matematica: 'Matemática'
+    };
 
-    while (questoes.length < 10 && tentativas < 5) {
-      tentativas++;
+    let loteIndex = 0;
+    while (todasQuestoes.length < totalAlvo && loteIndex < plan.batches.length + 10) {
+      const lote = plan.batches[Math.min(loteIndex, plan.batches.length - 1)];
+      const restante = totalAlvo - todasQuestoes.length;
+      const qtd = Math.min(lote.size, restante);
+      const materiaResumo = Object.entries(lote.subjectCounts)
+        .map(([materia, quantidade]) => `${materia}: ${quantidade}`)
+        .join('; ');
 
-      try {
-        const resposta = await chamarIA(`
-Crie 10 questões inéditas estilo ENEM.
+      const resposta = await chamarIA(`
+Crie um lote de ${qtd} questões inéditas estilo ENEM.
+Distribuição exata deste bloco: ${materiaResumo}
+
+Importante: o resultado final da prova deve chegar a ${totalAlvo} questões e manter a divisão real do ENEM por área.
 
 RETORNE SOMENTE JSON:
 {
   "questoes":[
     {
       "enunciado":"",
+      "materia":"",
       "opcoes":{
         "A":"",
         "B":"",
@@ -722,61 +786,57 @@ RETORNE SOMENTE JSON:
 }
 `);
 
-        const json =
-          extrairJSONSeguro(
-            resposta
-          );
-
-        if (json?.questoes) {
-          questoes.push(
-            ...json.questoes
-          );
-        }
-
-      } catch (e) {
-        console.log(
-          "Tentativa falhou"
-        );
+      const json = extrairJSONSeguro(resposta);
+      if (!json?.questoes || !Array.isArray(json.questoes) || json.questoes.length === 0) {
+        loteIndex += 1;
+        continue;
       }
-    }
 
-    if (questoes.length === 0) {
-      return res.status(500).json({
-        error:
-          "Falha ao gerar questões"
+      const subjectOrder = [];
+      Object.entries(lote.subjectCounts).forEach(([materia, quantidade]) => {
+        for (let i = 0; i < quantidade; i += 1) {
+          subjectOrder.push(materia);
+        }
       });
+
+      const loteQuestoes = json.questoes.slice(0, qtd).map((questao, idx) => {
+        const materiaKey = subjectOrder[idx] || 'linguagens';
+        return {
+          ...questao,
+          materia: String(questao.materia || materiaLabels[materiaKey] || 'Linguagens e Códigos').trim() || materiaLabels[materiaKey] || 'Linguagens e Códigos'
+        };
+      });
+
+      todasQuestoes.push(...loteQuestoes);
+      loteIndex += 1;
     }
 
-    const result =
-      await db.query(`
-        INSERT INTO provas_ativas(
-          usuario_id,
-          questoes
-        )
-        VALUES($1,$2)
-        RETURNING id
-      `, [
-        req.user.id,
-        JSON.stringify(
-          questoes
-        )
-      ]);
+    if (todasQuestoes.length < totalAlvo) {
+      return res.status(500).json({ error: 'Não foi possível completar o ENEM com 90 questões.' });
+    }
 
-    const provaId =
-      result.rows[0].id;
+    const finalQuestoes = normalizarQuestoesGeradas(todasQuestoes.slice(0, totalAlvo));
+    if (finalQuestoes.length < totalAlvo) {
+      return res.status(500).json({ error: 'O ENEM gerado contém questões inválidas.' });
+    }
+
+    const result = await db.query(`
+      INSERT INTO provas_ativas(usuario_id, questoes)
+      VALUES($1, $2)
+      RETURNING id
+    `, [req.user.id, JSON.stringify(finalQuestoes)]);
+
+    const provaId = result.rows[0].id;
 
     res.json({
       prova_id: provaId,
-      questoes: removerGabarito(questoes)
+      questoes: removerGabarito(finalQuestoes)
     });
 
   } catch (err) {
     console.error(err);
 
-    res.status(500).json({
-      error:
-        "Erro ENEM"
-    });
+    res.status(500).json({ error: 'Erro ENEM' });
   }
 });
 
@@ -828,13 +888,15 @@ app.post("/salvar-prova", auth, async (req, res) => {
           await client.query('ROLLBACK');
           return res.status(400).json({ error: 'Resposta inválida' });
         }
-        if (selecionada && selecionada === String(questao.correta || '').toUpperCase()) acertos++;
+        const acertou = Boolean(selecionada && selecionada === String(questao.correta || '').toUpperCase());
+        if (acertou) acertos++;
         respostasSalvas.push({
           enunciado: questao.enunciado,
           materia: questao.materia,
           assunto: questao.assunto,
           opcoes: questao.opcoes,
-          selecionada
+          selecionada,
+          acertou
         });
       }
 
@@ -937,35 +999,47 @@ app.get("/dashboard", auth, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const user = await db.query(`
-      SELECT xp, nivel
-      FROM usuarios
-      WHERE id = $1
+    const result = await db.query(`
+      WITH provas_usuario AS (
+        SELECT acertos, total, percentual
+        FROM provas
+        WHERE usuario_id = $1
+        UNION ALL
+        SELECT acertos, total, percentual
+        FROM respostas_provas_professor
+        WHERE aluno_id = $1 AND finalizada = TRUE
+      )
+      SELECT
+        u.xp,
+        u.nivel,
+        r.total_provas,
+        r.acertos,
+        r.questoes,
+        r.melhor_percentual,
+        CASE WHEN r.questoes > 0 THEN r.acertos::numeric / r.questoes * 100 ELSE 0 END AS percentual_geral
+      FROM usuarios u
+      CROSS JOIN (
+        SELECT
+          COUNT(*)::int AS total_provas,
+          COALESCE(SUM(acertos), 0)::int AS acertos,
+          COALESCE(SUM(total), 0)::int AS questoes,
+          COALESCE(MAX(percentual), 0)::real AS melhor_percentual
+        FROM provas_usuario
+      ) r
+      WHERE u.id = $1
     `, [userId]);
 
-    const provas = await db.query(`
-      SELECT acertos, total, percentual, criado_em, 'simulado' AS tipo
-      FROM provas
-      WHERE usuario_id = $1
-      UNION ALL
-      SELECT acertos, total, percentual, finalizada_em AS criado_em, 'prova_professor' AS tipo
-      FROM respostas_provas_professor
-      WHERE aluno_id = $1 AND finalizada = TRUE
-      ORDER BY criado_em ASC NULLS LAST
-    `, [userId]);
-
-    const resumo = provas.rows.reduce((acc, prova) => {
-      acc.total_provas += 1;
-      acc.acertos += Number(prova.acertos || 0);
-      acc.questoes += Number(prova.total || 0);
-      acc.melhor_percentual = Math.max(acc.melhor_percentual, Number(prova.percentual || 0));
-      return acc;
-    }, { total_provas: 0, acertos: 0, questoes: 0, melhor_percentual: 0 });
-    resumo.percentual_geral = resumo.questoes ? (resumo.acertos / resumo.questoes) * 100 : 0;
+    const row = result.rows[0];
+    const resumo = {
+      total_provas: Number(row.total_provas || 0),
+      acertos: Number(row.acertos || 0),
+      questoes: Number(row.questoes || 0),
+      melhor_percentual: Number(row.melhor_percentual || 0),
+      percentual_geral: Number(row.percentual_geral || 0)
+    };
 
     res.json({
-      user: user.rows[0],
-      provas: provas.rows,
+      user: { xp: row.xp, nivel: row.nivel },
       resumo
     });
 
@@ -979,36 +1053,79 @@ app.get("/dashboard", auth, async (req, res) => {
 
 app.get("/grafico", auth, async (req, res) => {
   try {
-    const result = await db.query(`
-      SELECT questoes
-      FROM provas
-      WHERE usuario_id = $1
-    `, [req.user.id]);
+    const [result, redacoes] = await Promise.all([
+      db.query(`
+        WITH respostas_materia AS (
+          SELECT questao->>'materia' AS materia, questao->>'acertou' = 'true' AS acertou
+          FROM provas p
+          CROSS JOIN LATERAL jsonb_array_elements(
+            CASE WHEN jsonb_typeof(p.questoes) = 'array' THEN p.questoes ELSE '[]'::jsonb END
+          ) AS itens(questao)
+          WHERE p.usuario_id = $1 AND questao ? 'acertou'
 
-    const materias = {
-      matematica: 0,
-      portugues: 0,
-      ciencias: 0,
-      humanas: 0
-    };
+          UNION ALL
 
-    result.rows.forEach(p => {
-      const q = p.questoes;
+          SELECT questao.item->>'materia' AS materia,
+            UPPER(COALESCE(resposta.item->>'selecionada', resposta.item#>>'{}', '')) = UPPER(COALESCE(questao.item->>'correta', '')) AS acertou
+          FROM respostas_provas_professor r
+          JOIN provas_professor p ON p.id = r.prova_id
+          CROSS JOIN LATERAL jsonb_array_elements(
+            CASE WHEN jsonb_typeof(p.questoes) = 'array' THEN p.questoes ELSE '[]'::jsonb END
+          ) WITH ORDINALITY AS questao(item, indice)
+          LEFT JOIN LATERAL jsonb_array_elements(
+            CASE WHEN jsonb_typeof(r.respostas) = 'array' THEN r.respostas ELSE '[]'::jsonb END
+          ) WITH ORDINALITY AS resposta(item, indice) ON resposta.indice = questao.indice
+          WHERE r.aluno_id = $1 AND r.finalizada = TRUE
+        ), categorizadas AS (
+          SELECT CASE
+            WHEN LOWER(COALESCE(materia, '')) LIKE '%matem%' THEN 'matematica'
+            WHEN LOWER(COALESCE(materia, '')) LIKE '%redac%' THEN 'redacao'
+            WHEN LOWER(COALESCE(materia, '')) LIKE '%portug%'
+              OR LOWER(COALESCE(materia, '')) LIKE '%linguagen%' THEN 'portugues'
+            WHEN LOWER(COALESCE(materia, '')) LIKE '%natureza%'
+              OR LOWER(COALESCE(materia, '')) LIKE '%biologia%'
+              OR LOWER(COALESCE(materia, '')) LIKE '%quimica%'
+              OR LOWER(COALESCE(materia, '')) LIKE '%fisica%' THEN 'ciencias'
+            WHEN LOWER(COALESCE(materia, '')) LIKE '%humanas%'
+              OR LOWER(COALESCE(materia, '')) LIKE '%historia%'
+              OR LOWER(COALESCE(materia, '')) LIKE '%geografia%' THEN 'humanas'
+            ELSE 'geral'
+          END AS materia, acertou
+          FROM respostas_materia
+        )
+        SELECT materia, COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE acertou)::int AS acertos
+        FROM categorizadas
+        GROUP BY materia
+      `, [req.user.id]),
+      db.query(`
+        SELECT COUNT(*)::int AS total,
+          COALESCE(ROUND(AVG(nota_total)::numeric / 10), 0)::int AS percentual
+        FROM redacoes
+        WHERE usuario_id = $1 AND nota_total IS NOT NULL
+      `, [req.user.id])
+    ]);
 
-      q.forEach(item => {
-        const materia = item.materia || "geral";
+    const categorias = ['matematica', 'portugues', 'redacao', 'ciencias', 'humanas', 'geral'];
+    const materias = Object.fromEntries(categorias.map((categoria) => [categoria, 0]));
+    const totais = Object.fromEntries(categorias.map((categoria) => [categoria, 0]));
 
-        if (!materias[materia]) {
-          materias[materia] = 0;
-        }
-
-        if (item.correta === item.selecionada) {
-          materias[materia]++;
-        }
-      });
+    result.rows.forEach((row) => {
+      materias[row.materia] = Number(row.acertos || 0);
+      totais[row.materia] = Number(row.total || 0);
     });
 
-    res.json(materias);
+    const redacao = redacoes.rows[0] || {};
+    materias.redacao = Number(redacao.percentual || 0);
+    totais.redacao = Number(redacao.total || 0);
+    const percentuais = Object.fromEntries(categorias.map((categoria) => [
+      categoria,
+      categoria === 'redacao'
+        ? materias.redacao
+        : totais[categoria] ? Math.round((materias[categoria] / totais[categoria]) * 100) : 0
+    ]));
+
+    res.json({ ...materias, totais, percentuais });
 
   } catch (err) {
     console.error(err);
@@ -1020,8 +1137,14 @@ app.get("/grafico", auth, async (req, res) => {
 // ======================
 app.get("/ranking", auth, async (req, res) => {
   try {
+    if (req.user.role === 'empresa_admin' && !req.user.empresa_id) {
+      return res.status(403).json({ error: 'Empresa obrigatoria' });
+    }
+    if (['professor', 'diretor', 'coordenador'].includes(req.user.role) && !req.user.escola_id) {
+      return res.status(403).json({ error: 'Escola obrigatoria' });
+    }
     if (req.user.role !== 'formulavest_master' && !req.user.empresa_id && !req.user.escola_id) {
-      return res.status(403).json({ error: 'Empresa ou escola obrigatoria' });
+      return res.json([]);
     }
 
     let query = `
@@ -1931,8 +2054,10 @@ app.get('/professor/periodos', auth, async (req, res) => {
     }
 
     const result = await db.query(`
-      SELECT *
+      SELECT p.*, e.nome AS escola_nome, empresa.nome AS empresa_nome
       FROM periodos p
+      JOIN escolas e ON e.id = p.escola_id
+      LEFT JOIN empresas empresa ON empresa.id = e.empresa_id
       ${where}
       ORDER BY p.id DESC
     `, params);
@@ -1954,9 +2079,11 @@ app.get('/professor/salas', auth, async (req, res) => {
     let result;
     if (req.user.role === 'professor') {
       result = await db.query(`
-        SELECT s.*, p.nome as periodo_nome
+        SELECT s.*, p.nome AS periodo_nome, e.nome AS escola_nome, empresa.nome AS empresa_nome
         FROM salas s
         JOIN periodos p ON p.id = s.periodo_id
+        JOIN escolas e ON e.id = p.escola_id
+        LEFT JOIN empresas empresa ON empresa.id = e.empresa_id
         WHERE s.id IN (SELECT sala_id FROM professor_salas WHERE professor_id = $1)
            OR s.id = COALESCE((SELECT sala_id FROM usuarios WHERE id = $1), NULL)
         ORDER BY p.id DESC, s.id DESC
@@ -1973,9 +2100,11 @@ app.get('/professor/salas', auth, async (req, res) => {
       }
 
       result = await db.query(`
-        SELECT s.*, p.nome as periodo_nome
+      SELECT s.*, p.nome AS periodo_nome, e.nome AS escola_nome, empresa.nome AS empresa_nome
         FROM salas s
         JOIN periodos p ON p.id = s.periodo_id
+      JOIN escolas e ON e.id = p.escola_id
+      LEFT JOIN empresas empresa ON empresa.id = e.empresa_id
         ${where}
         ORDER BY p.id DESC, s.id DESC
       `, params);

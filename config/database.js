@@ -47,7 +47,7 @@ async function initDB() {
 
   if (process.env.DB_AUTO_MIGRATE !== 'true') {
     const migration = await db.query(
-      "SELECT 1 FROM schema_migrations WHERE filename = '011_unique_school_names.sql'"
+      "SELECT 1 FROM schema_migrations WHERE filename = '012_achievements_unique.sql'"
     );
     if (!migration.rows.length) {
       throw new Error('Migrations pendentes. Execute npm run db:migrate antes de iniciar a aplicação.');

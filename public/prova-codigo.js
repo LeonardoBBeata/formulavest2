@@ -1,5 +1,24 @@
 const API = window.location.origin;
-const token = null;
+const token = (() => {
+  try {
+    return localStorage.getItem('access_token');
+  } catch (error) {
+    return null;
+  }
+})();
+
+function apiFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  return fetch(url, {
+    credentials: 'same-origin',
+    ...options,
+    headers
+  });
+}
 
 if (localStorage.getItem('auth_session') !== '1') {
   window.location.href = '/login.html';
@@ -16,13 +35,12 @@ el('entrar-prova-btn')?.addEventListener('click', async () => {
     return;
   }
 
+  sessionStorage.removeItem('provaAtual');
+
   try {
-    const res = await fetch(`${API}/provas-prontas/entrar`, {
+    const res = await apiFetch(`${API}/provas-prontas/entrar`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ codigo })
     });
 

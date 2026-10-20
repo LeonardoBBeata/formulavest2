@@ -1,7 +1,88 @@
 const fs = require('fs');
 const crypto = require('crypto');
 
-module.exports = function registerUserRoutes(app, deps = {}) {
+function buildConquistaState({ provas = [], xp = 0, nivel = 1, lastActive = null, existing = [] } = {}) {
+  const total = provas.length;
+  const dates = Array.from(new Set(
+    provas
+      .filter(prova => prova && prova.data)
+      .map(prova => String(prova.data).slice(0, 10))
+  )).sort((a, b) => b.localeCompare(a));
+
+  let streak = 0;
+  if (dates.length > 0) {
+    const shiftDay = (dateKey, amount) => {
+      const date = new Date(`${dateKey}T00:00:00.000Z`);
+      date.setUTCDate(date.getUTCDate() + amount);
+      return date.toISOString().slice(0, 10);
+    };
+
+    const todayKey = new Date().toISOString().slice(0, 10);
+    let expectedDay = dates[0] === todayKey ? todayKey : dates[0] === shiftDay(todayKey, -1) ? dates[0] : null;
+
+    if (expectedDay) {
+      for (const dateKey of dates) {
+        if (dateKey !== expectedDay) break;
+        streak += 1;
+        expectedDay = shiftDay(expectedDay, -1);
+      }
+    }
+  }
+
+  const conquistas = {
+    primeira_prova: total >= 1,
+    tres_provas: total >= 3,
+    dez_provas: total >= 10,
+    cinquenta_provas: total >= 50,
+    prova_perfeita: provas.some(prova => Number(prova.total) > 0 && Number(prova.percentual) >= 100),
+    xp_100: xp >= 100,
+    nivel_5: nivel >= 5,
+    nivel_10: nivel >= 10,
+    streak_3: streak >= 3,
+    streak_7: streak >= 7,
+    streak_days: streak,
+    last_active: lastActive
+  };
+
+  const mapa = {
+    primeira_prova: { titulo: 'Primeira prova', descricao: 'Concluiu a primeira prova' },
+    tres_provas: { titulo: 'Em ritmo', descricao: 'Concluiu 3 provas' },
+    dez_provas: { titulo: '10 provas', descricao: 'Concluiu 10 provas' },
+    cinquenta_provas: { titulo: '50 provas', descricao: 'Concluiu 50 provas' },
+    prova_perfeita: { titulo: 'Nota máxima', descricao: 'Acertou 100% de uma prova' },
+    xp_100: { titulo: '100 XP', descricao: 'Acumulou seus primeiros 100 XP' },
+    nivel_5: { titulo: 'Nível 5', descricao: 'Alcançou o nível 5' },
+    nivel_10: { titulo: 'Nível 10', descricao: 'Alcançou o nível 10' },
+    streak_3: { titulo: 'Constância', descricao: 'Concluiu provas por 3 dias seguidos' },
+    streak_7: { titulo: 'Sequência 7 dias', descricao: 'Finalizou provas por 7 dias consecutivos' }
+  };
+
+  const existingSet = existing instanceof Set ? existing : new Set((existing || []).map(item => item && item.chave ? item.chave : item));
+  const novasConquistas = [];
+
+  for (const key of Object.keys(mapa)) {
+    if (conquistas[key] && !existingSet.has(key)) {
+      const meta = {};
+      if (key === 'dez_provas') meta.count = 10;
+      if (key === 'cinquenta_provas') meta.count = 50;
+      if (key === 'streak_7') meta.days = streak;
+      novasConquistas.push({ chave: key, titulo: mapa[key].titulo, descricao: mapa[key].descricao, meta });
+    }
+  }
+
+  return {
+    conquistas,
+    total,
+    xp,
+    nivel,
+    historico: [],
+    novas_conquistas: novasConquistas,
+    streak_days: streak,
+    last_active: lastActive
+  };
+}
+
+function registerUserRoutes(app, deps = {}) {
   const { auth, authLimiter, bcrypt, db, enviarEmail, upload, validator } = deps;
 
 // XP is awarded only by server-side completion flows. Accepting a client supplied
@@ -45,7 +126,8 @@ app.get("/me", auth, async (req, res) => {
 
 app.get('/me/conquistas', auth, async (req, res) => {
   try {
-    if (req.user.role !== 'aluno') {
+    const role = String(req.user.role || 'aluno').trim() || 'aluno';
+    if (role !== 'aluno') {
       return res.json({
         conquistas: {},
         total: 0,
@@ -57,103 +139,42 @@ app.get('/me/conquistas', auth, async (req, res) => {
     const userId = req.user.id;
 
     const provasRes = await db.query(`
-      SELECT criado_em AS data, acertos, total, percentual
+      SELECT TO_CHAR(criado_em, 'YYYY-MM-DD') AS data, acertos, total, percentual
       FROM provas
       WHERE usuario_id = $1
       UNION ALL
-      SELECT finalizada_em AS data, acertos, total, percentual
+      SELECT TO_CHAR(finalizada_em, 'YYYY-MM-DD') AS data, acertos, total, percentual
       FROM respostas_provas_professor
       WHERE aluno_id = $1 AND finalizada = TRUE AND finalizada_em IS NOT NULL
       ORDER BY data DESC
     `, [userId]);
-    const provas = provasRes.rows;
-    const total = provas.length;
 
+    const provas = provasRes.rows;
     const u = await db.query(`SELECT xp, nivel, last_active FROM usuarios WHERE id=$1`, [userId]);
     const xp = Number(u.rows[0]?.xp || 0);
     const nivel = Number(u.rows[0]?.nivel || 1);
     const lastActive = u.rows[0]?.last_active ? new Date(u.rows[0].last_active) : null;
-
-    const dates = Array.from(new Set(
-      provas
-        .filter(prova => prova.data)
-        .map(prova => new Date(prova.data).toISOString().slice(0, 10))
-    )).map(data => new Date(`${data}T00:00:00`)).sort((a, b) => b - a);
-
-    let streak = 0;
-    if (dates.length > 0) {
-      let expected = new Date();
-      expected.setHours(0,0,0,0);
-      for (let i = 0; i < dates.length; i++) {
-        const dt = new Date(dates[i]); dt.setHours(0,0,0,0);
-        if (dt.getTime() === expected.getTime()) {
-          streak++;
-          expected.setDate(expected.getDate() - 1);
-        } else if (dt.getTime() < expected.getTime()) {
-          break;
-        }
-      }
-    }
-
-    const conquistas = {
-      primeira_prova: total >= 1,
-      tres_provas: total >= 3,
-      dez_provas: total >= 10,
-      cinquenta_provas: total >= 50,
-      prova_perfeita: provas.some(prova => Number(prova.total) > 0 && Number(prova.percentual) >= 100),
-      xp_100: xp >= 100,
-      nivel_5: nivel >= 5,
-      nivel_10: nivel >= 10,
-      streak_3: streak >= 3,
-      streak_7: streak >= 7,
-      streak_days: streak,
-      last_active: lastActive
-    };
-
-    // mapeamento de títulos/descrições para histórico
-    const mapa = {
-      primeira_prova: { titulo: 'Primeira prova', descricao: 'Concluiu a primeira prova' },
-      tres_provas: { titulo: 'Em ritmo', descricao: 'Concluiu 3 provas' },
-      dez_provas: { titulo: '10 provas', descricao: 'Concluiu 10 provas' },
-      cinquenta_provas: { titulo: '50 provas', descricao: 'Concluiu 50 provas' },
-      prova_perfeita: { titulo: 'Nota máxima', descricao: 'Acertou 100% de uma prova' },
-      xp_100: { titulo: '100 XP', descricao: 'Acumulou seus primeiros 100 XP' },
-      nivel_5: { titulo: 'Nível 5', descricao: 'Alcançou o nível 5' },
-      nivel_10: { titulo: 'Nível 10', descricao: 'Alcançou o nível 10' },
-      streak_3: { titulo: 'Constância', descricao: 'Concluiu provas por 3 dias seguidos' },
-      streak_7: { titulo: 'Sequência 7 dias', descricao: 'Finalizou provas por 7 dias consecutivos' }
-    };
-
-    // buscar conquistas já gravadas
     const existingRes = await db.query(`SELECT chave FROM conquistas_historico WHERE usuario_id = $1`, [userId]);
     const existing = new Set(existingRes.rows.map(r => r.chave));
 
-    // inserir novas conquistas no histórico
-    const novasConquistas = [];
-    for (const key of Object.keys(mapa)) {
-      if (conquistas[key] && !existing.has(key)) {
-        const meta = {};
-        if (key === 'dez_provas') meta.count = 10;
-        if (key === 'cinquenta_provas') meta.count = 50;
-        if (key === 'streak_7') meta.days = streak;
-        try {
-          const insert = await db.query(`
-            INSERT INTO conquistas_historico(usuario_id, chave, titulo, descricao, meta)
-            VALUES($1,$2,$3,$4,$5)
-            ON CONFLICT (usuario_id, chave) DO NOTHING
-            RETURNING chave, titulo, descricao, meta, criado_em
-          `, [userId, key, mapa[key].titulo, mapa[key].descricao, meta]);
-          if (insert.rows[0]) novasConquistas.push(insert.rows[0]);
-        } catch (e) {
-          console.error('Erro gravar conquista', key, e);
-        }
+    const state = buildConquistaState({ provas, xp, nivel, lastActive, existing });
+
+    for (const conquista of state.novas_conquistas) {
+      try {
+        await db.query(`
+          INSERT INTO conquistas_historico(usuario_id, chave, titulo, descricao, meta)
+          VALUES($1,$2,$3,$4,$5)
+          ON CONFLICT (usuario_id, chave) DO NOTHING
+          RETURNING chave, titulo, descricao, meta, criado_em
+        `, [userId, conquista.chave, conquista.titulo, conquista.descricao, conquista.meta]);
+      } catch (e) {
+        console.error('Erro gravar conquista', conquista.chave, e);
       }
     }
 
-    // retornar também o histórico recente
     const hist = await db.query(`SELECT id, chave, titulo, descricao, meta, criado_em FROM conquistas_historico WHERE usuario_id = $1 ORDER BY criado_em DESC LIMIT 100`, [userId]);
 
-    res.json({ conquistas, total, xp, nivel, historico: hist.rows, novas_conquistas: novasConquistas });
+    res.json({ conquistas: state.conquistas, total: state.total, xp: state.xp, nivel: state.nivel, historico: hist.rows, novas_conquistas: state.novas_conquistas });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erro conquistas' });
@@ -163,7 +184,8 @@ app.get('/me/conquistas', auth, async (req, res) => {
 // listar histórico completo de conquistas do usuário
 app.get('/me/conquistas/historico', auth, async (req, res) => {
   try {
-    if (req.user.role !== 'aluno') {
+    const role = String(req.user?.role || 'aluno').trim() || 'aluno';
+    if (role !== 'aluno') {
       return res.json({ historico: [] });
     }
 
@@ -436,3 +458,6 @@ app.put("/trocar-senha", auth, async (req, res) => {
   }
 });
 };
+
+module.exports = registerUserRoutes;
+module.exports.buildConquistaState = buildConquistaState;
