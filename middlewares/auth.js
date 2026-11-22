@@ -63,8 +63,16 @@ async function auth(req, res, next) {
 
   if (!token) return res.status(401).json({ error: 'Token ausente' });
 
+  let payload;
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET, jwtOptions);
+    payload = jwt.verify(token, process.env.JWT_SECRET, jwtOptions);
+  } catch {
+    return res.status(401).json({
+      error: 'Token invalido'
+    });
+  }
+
+  try {
     const result = await db.query(
       `SELECT id, username, role, empresa_id, escola_id, sala_id, banido, verificado, token_version
        FROM usuarios WHERE id = $1`,
@@ -78,14 +86,12 @@ async function auth(req, res, next) {
     if (!user.role) {
       await db.query(`UPDATE usuarios SET role = 'aluno' WHERE id = $1`, [user.id]);
     }
-
     req.user = { ...user, role: normalizeUserRole(user.role) };
-    next();
-  } catch {
-    return res.status(401).json({
-      error: 'Token invalido'
-    });
+  } catch (error) {
+    return next(error);
   }
+
+  return next();
 }
 
 module.exports = {

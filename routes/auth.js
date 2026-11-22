@@ -1,6 +1,8 @@
 module.exports = function registerAuthRoutes(app, deps = {}) {
   const { authLimiter, bcrypt, crypto, db, enviarEmail, gerarToken, loginLimiter, validator } = deps;
-  const exposeTestCodes = process.env.NODE_ENV !== 'production' && process.env.EXPOSE_TEST_CODES === 'true';
+  const exposeTestCodes = process.env.NODE_ENV === 'production'
+    ? process.env.TEMPORARY_OTP_DISPLAY === 'true'
+    : process.env.EXPOSE_TEST_CODES === 'true';
 
   // Persist only a hash, so a database disclosure does not reveal live sessions.
   const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
@@ -55,7 +57,11 @@ module.exports = function registerAuthRoutes(app, deps = {}) {
       `, [user.id]);
       return { ok: false, reason: entrega?.reason || 'provider' };
     }
-    return { ok: true, devCodigo: exposeTestCodes ? codigo : undefined };
+    return {
+      ok: true,
+      simulated: Boolean(entrega.simulated),
+      devCodigo: exposeTestCodes ? codigo : undefined
+    };
   }
 
 app.post('/register', async (req, res) => {
@@ -140,8 +146,9 @@ RETURNING id, email
 
         return res.json({
             ok: true,
-            message: 'Código enviado para seu e-mail',
-            email_enviado: true,
+            message: emailResult.simulated ? 'Código temporário gerado.' : 'Código enviado para seu e-mail.',
+            email_enviado: !emailResult.simulated,
+            envio_simulado: emailResult.simulated,
             dev_codigo: emailResult.devCodigo
         });
 
@@ -163,7 +170,13 @@ app.post('/reenviar-verificacao', authLimiter, async (req, res) => {
 
     const delivery = await enviarCodigo(user, 'Código de verificação - FórmulaVest', codigo => `Seu código de verificação é: ${codigo}`);
     if (!delivery.ok) return res.status(503).json({ error: 'Não foi possível enviar o código agora. Tente novamente mais tarde.' });
-    return res.json({ ok: true, message: 'Novo código enviado.', dev_codigo: delivery.devCodigo });
+    return res.json({
+      ok: true,
+      message: delivery.simulated ? 'Código temporário gerado.' : 'Novo código enviado.',
+      email_enviado: !delivery.simulated,
+      envio_simulado: delivery.simulated,
+      dev_codigo: delivery.devCodigo
+    });
   } catch (err) {
     console.error('Erro ao reenviar verificação:', err);
     return res.status(500).json({ error: 'Erro ao reenviar código' });
@@ -298,7 +311,12 @@ app.post(
         return res.status(503).json({ error: 'Não foi possível enviar o código de login. Tente novamente mais tarde.' });
       }
 
-      res.json({ ok: true, dev_codigo: delivery.devCodigo });
+      res.json({
+        ok: true,
+        email_enviado: !delivery.simulated,
+        envio_simulado: delivery.simulated,
+        dev_codigo: delivery.devCodigo
+      });
 
     } catch (err) {
       console.error(err);
@@ -438,10 +456,10 @@ app.post(
         WHERE email=$2
       `, [hashToken(token), email]);
 
-      const resetHost = process.env.APP_URL || 'https://formulavest.onrender.com';
+      const resetHost = process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'https://formulavest.onrender.com';
       const link = `${resetHost.replace(/\/$/, '')}/reset-password.html?token=${token}`;
 
-      await enviarEmail(
+      const delivery = await enviarEmail(
         email,
         "Recuperar senha - FórmulaVest",
         `Acesse: ${link}`,
@@ -453,6 +471,18 @@ app.post(
         </a>
         `
       );
+
+      if (!delivery?.ok || delivery.simulated) {
+        await db.query(`
+          UPDATE usuarios
+          SET reset_token = NULL, reset_expira = NULL
+          WHERE email = $1
+        `, [email]);
+        console.warn('Email de recuperação não enviado:', delivery?.reason || 'provider');
+        return res.status(503).json({
+          error: 'Não foi possível enviar o email de recuperação. Tente novamente mais tarde.'
+        });
+      }
 
       res.json({
         message:

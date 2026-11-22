@@ -68,6 +68,8 @@ describeDb('Autenticação e autorização com PostgreSQL', () => {
       .send({ username, email, senha: 'senha-de-teste-123' });
     expect(cadastro.statusCode).toBe(200);
     expect(cadastro.body.dev_codigo).toMatch(/^\d{6}$/);
+    expect(cadastro.body.email_enviado).toBe(false);
+    expect(cadastro.body.envio_simulado).toBe(true);
 
     const verificacao = await request(app)
       .post('/verificar-email')
@@ -79,6 +81,8 @@ describeDb('Autenticação e autorização com PostgreSQL', () => {
       .send({ email, senha: 'senha-de-teste-123' });
     expect(inicio.statusCode).toBe(200);
     expect(inicio.body.dev_codigo).toMatch(/^\d{6}$/);
+    expect(inicio.body.email_enviado).toBe(false);
+    expect(inicio.body.envio_simulado).toBe(true);
 
     const confirmacao = await request(app)
       .post('/login-confirmar')

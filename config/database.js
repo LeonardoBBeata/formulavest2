@@ -1,4 +1,6 @@
 const bcrypt = require('bcrypt');
+const fs = require('fs');
+const path = require('path');
 const { Pool } = require('pg');
 
 const useSSL =
@@ -46,11 +48,16 @@ async function initDB() {
   }
 
   if (process.env.DB_AUTO_MIGRATE !== 'true') {
-    const migration = await db.query(
-      "SELECT 1 FROM schema_migrations WHERE filename = '012_achievements_unique.sql'"
-    );
-    if (!migration.rows.length) {
-      throw new Error('Migrations pendentes. Execute npm run db:migrate antes de iniciar a aplicação.');
+    const migrationsDir = path.join(__dirname, '..', 'migrations');
+    const expectedMigrations = fs.readdirSync(migrationsDir)
+      .filter(file => /^\d+_.+\.sql$/.test(file))
+      .sort();
+    const appliedResult = await db.query('SELECT filename FROM schema_migrations');
+    const appliedMigrations = new Set(appliedResult.rows.map(row => row.filename));
+    const pendingMigrations = expectedMigrations.filter(file => !appliedMigrations.has(file));
+
+    if (pendingMigrations.length) {
+      throw new Error(`Migrations pendentes: ${pendingMigrations.join(', ')}. Execute npm run db:migrate antes de iniciar a aplicação.`);
     }
     return true;
   }

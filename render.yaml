@@ -1,0 +1,44 @@
+databases:
+  - name: formulavest-pilot-db
+    databaseName: formulavest
+    user: formulavest
+    plan: free
+    region: ohio
+    ipAllowList: []
+
+services:
+  - type: web
+    name: formulavest-pilot-40
+    runtime: node
+    plan: free
+    region: ohio
+    buildCommand: npm ci
+    startCommand: npm run db:migrate && npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: EMAIL_PROVIDER
+        value: console
+      - key: TEMPORARY_OTP_DISPLAY
+        value: "true"
+      - key: EXPOSE_TEST_CODES
+        value: "false"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: formulavest-pilot-db
+          property: connectionString
+      - key: DATABASE_SSL
+        value: "false"
+      - key: DB_POOL_MAX
+        value: "10"
+      - key: AUTH_RATE_LIMIT_MAX
+        value: "200"
+      - key: LOGIN_RATE_LIMIT_MAX
+        value: "120"
+      - key: GLOBAL_RATE_LIMIT_MAX
+        value: "1000"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: MASTER_PASSWORD
+        sync: false

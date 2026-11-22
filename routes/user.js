@@ -290,7 +290,9 @@ app.put("/atualizar-perfil", auth, async (req, res) => {
         'Confirme seu novo email - FórmulaVest',
         `Seu código de confirmação é: ${pendingCode}`
       );
-      if (!delivery?.ok) return res.status(503).json({ error: 'Não foi possível enviar o código para o novo email' });
+      if (!delivery?.ok || delivery.simulated) {
+        return res.status(503).json({ error: 'A alteração de email exige envio de email, indisponível no modo temporário' });
+      }
     }
 
     const client = await db.connect();

@@ -127,10 +127,6 @@ document
       return;
     }
 
-    if (data.dev_codigo) {
-      alert(`Código de teste para login: ${data.dev_codigo}`);
-    }
-
     // ADM entra direto
     if (
       data.adminDirect
@@ -187,6 +183,13 @@ document
     mostrar(
       "codigo-login-box"
     );
+    const avisoLogin = document.getElementById('codigo-login-aviso');
+    if (avisoLogin) {
+      avisoLogin.textContent = data.dev_codigo
+        ? `Modo temporário: o email está desativado. Seu código de login é ${data.dev_codigo}.`
+        : 'Digite o código enviado para seu email.';
+      avisoLogin.classList.remove('hidden');
+    }
   };
 
 // ======================
@@ -351,7 +354,7 @@ document
       const aviso = document.getElementById('codigo-aviso');
       if (aviso) {
         aviso.textContent = data.dev_codigo
-          ? `Código de teste: ${data.dev_codigo}`
+          ? `Modo temporário: o email está desativado. Seu código de verificação é ${data.dev_codigo}.`
           : 'Enviamos um código de verificação para o seu e-mail.';
         aviso.classList.remove('hidden');
       }
@@ -384,7 +387,13 @@ document.getElementById('reenviar-cadastro-btn').onclick = async () => {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Não foi possível reenviar o código');
-    alert(data.dev_codigo ? `Novo código de teste: ${data.dev_codigo}` : 'Novo código enviado.');
+    const aviso = document.getElementById('codigo-aviso');
+    if (aviso) {
+      aviso.textContent = data.dev_codigo
+        ? `Modo temporário: o email está desativado. Seu novo código é ${data.dev_codigo}.`
+        : 'Novo código enviado para seu email.';
+      aviso.classList.remove('hidden');
+    }
   } catch (err) {
     alert(err.message || 'Não foi possível reenviar o código');
   } finally {

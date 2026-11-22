@@ -248,7 +248,7 @@ async function chamarIA(prompt, modelos = obterModelos()) {
           headers: {
             Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
             'Content-Type': 'application/json',
-            'HTTP-Referer': process.env.APP_URL || 'https://formulavest.onrender.com',
+            'HTTP-Referer': process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'https://formulavest.onrender.com',
             'X-Title': 'FormulaVest'
           },
           timeout: 120000

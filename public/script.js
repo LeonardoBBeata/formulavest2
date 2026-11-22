@@ -13,8 +13,23 @@ let respostasUser = {};
 let grafico = null;
 let focoTimer = null;
 let focoSegundos = 25 * 60;
-let metas = JSON.parse(localStorage.getItem("metas") || "[]");
-let planoDia = JSON.parse(localStorage.getItem("planoDia") || "[]");
+function carregarArrayLocalStorage(chave) {
+  const armazenado = localStorage.getItem(chave);
+  if (!armazenado) return [];
+
+  try {
+    const valor = JSON.parse(armazenado);
+    if (Array.isArray(valor)) return valor;
+  } catch (error) {
+    console.warn(`Dados locais inválidos em "${chave}".`, error);
+  }
+
+  console.warn(`Dados locais inválidos em "${chave}": era esperado um array.`);
+  return [];
+}
+
+let metas = carregarArrayLocalStorage("metas");
+let planoDia = carregarArrayLocalStorage("planoDia");
 let notificacoesAtivas = localStorage.getItem("notificacoesAtivas") === "true";
 let temaAtual = localStorage.getItem("theme") || "dark";
 let escalaFonte = localStorage.getItem("fontScale") || "normal";

@@ -34,6 +34,14 @@ const app = express();
 const PORT = process.env.PORT || 3002;
 const isProd = process.env.NODE_ENV === 'production';
 let httpServer;
+const positiveIntEnv = (name, fallback) => {
+  const value = Number(process.env[name]);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+};
+
+if (isProd && process.env.TEMPORARY_OTP_DISPLAY === 'true') {
+  logger.warn('TEMPORARY_OTP_DISPLAY está ativo: códigos de autenticação serão expostos na página.');
+}
 
 if (process.env.OPENROUTER_MODEL) {
   logger.warn({ modelo: process.env.OPENROUTER_MODEL }, 'OpenRouter configurado com modelo de IA');
@@ -80,14 +88,14 @@ app.use((req, res, next) => {
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: positiveIntEnv('LOGIN_RATE_LIMIT_MAX', 10),
   standardHeaders: true,
   legacyHeaders: false
 });
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: positiveIntEnv('AUTH_RATE_LIMIT_MAX', 30),
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -106,7 +114,7 @@ const aiLimiter = rateLimit({
 
 const globalLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 300,
+  max: positiveIntEnv('GLOBAL_RATE_LIMIT_MAX', 300),
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -121,7 +129,7 @@ app.use(
   cors({
     origin: (origin, callback) => {
       const allowedOrigins = [
-        process.env.APP_URL || 'https://formulavest.onrender.com',
+        process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'https://formulavest.onrender.com',
         'http://localhost:3000',
         'http://127.0.0.1:3000',
         'http://localhost:3001',

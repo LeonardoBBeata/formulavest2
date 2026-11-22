@@ -66,9 +66,13 @@
   <!-- CONFIRMAR LOGIN -->
   <div id="codigo-login-box" class="card hidden">
     <h1>Confirmar Login</h1>
+    <div id="codigo-login-aviso" class="codigo-aviso hidden" role="status" aria-live="polite"></div>
 
     <input
       id="codigo-login"
+      inputmode="numeric"
+      autocomplete="one-time-code"
+      maxlength="6"
       placeholder="Código recebido"
     >
 
@@ -117,6 +121,9 @@
 
     <input
       id="codigo-cadastro"
+      inputmode="numeric"
+      autocomplete="one-time-code"
+      maxlength="6"
       placeholder="Código"
     >
 

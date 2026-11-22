@@ -9,15 +9,15 @@ Revisao atualizada apos o hardening das rotas. Foram adicionados escopo de escol
 - [ ] Executar migrations num clone/restauro recente da base de producao e validar a aplicacao antes do deploy.
 - [ ] Revisar duplicatas legadas de periodos/salas: a migration 011 preserva IDs/relacionamentos e acrescenta `[registro-ID]` aos nomes duplicados antes de instalar índices únicos.
 - [ ] Confirmar que `DATABASE_URL` aponta para o host correto e usa credenciais dedicadas. Para PostgreSQL gerenciado, definir `DATABASE_SSL=true` e validar certificado; para o Postgres interno do Compose, manter `DATABASE_SSL=false` somente com a porta do banco privada e nao publicada.
-- [ ] Trocar `JWT_SECRET`, `MASTER_PASSWORD`, senha do banco, SMTP e demais chaves por segredos aleatorios fora do repositorio; nunca reutilizar os valores locais.
+- [ ] Trocar `JWT_SECRET`, `MASTER_PASSWORD`, senha do banco, chave API do Resend e demais segredos fora do repositorio; nunca reutilizar os valores locais.
 - [ ] Restringir `APP_URL`/CORS ao dominio final e configurar o proxy TLS para que `trust proxy` corresponda exatamente a topologia real.
-- [ ] Configurar SMTP de producao e provar cadastro, verificacao, recuperacao de senha e entrega de email sem fallback de desenvolvimento.
+- [ ] Configurar `EMAIL_PROVIDER=resend`, `RESEND_API_KEY` e `RESEND_FROM_EMAIL` com remetente/domínio verificado; provar cadastro, verificacao, recuperacao de senha e entrega de email.
 - [ ] Fazer backup consistente antes da migration e executar um teste de restauracao em ambiente isolado.
-- [ ] Garantir que `EXPOSE_TEST_CODES` nao esteja ativo e que `NODE_ENV=production` esteja definido.
+- [ ] Garantir que `EXPOSE_TEST_CODES` esteja desativado em producao. `TEMPORARY_OTP_DISPLAY=true` expoe os codigos e remove o segundo fator; use apenas durante teste controlado e desligue imediatamente depois.
 
 ## Deploy com Docker Compose
 
-1. Preparar `.env` fora do controle de versao. Definir `POSTGRES_PASSWORD`, `DATABASE_URL` com host `postgres`, `JWT_SECRET`, `MASTER_PASSWORD`, `APP_URL` e credenciais de email. O Compose de producao usa `DATABASE_SSL=false` apenas para seu banco interno privado; ao usar PostgreSQL gerenciado, configurar `DATABASE_SSL=true`.
+1. Preparar `.env` fora do controle de versao. Definir `POSTGRES_PASSWORD`, `DATABASE_URL` com host `postgres`, `JWT_SECRET`, `MASTER_PASSWORD`, `APP_URL`, `EMAIL_PROVIDER=resend`, `RESEND_API_KEY` e `RESEND_FROM_EMAIL`. O remetente/domínio precisa estar verificado no Resend. O Compose de producao usa `DATABASE_SSL=false` apenas para seu banco interno privado; ao usar PostgreSQL gerenciado, configurar `DATABASE_SSL=true`.
 2. Fazer backup da base e validar o artefato/imagem da aplicacao.
 3. Iniciar o banco e esperar o healthcheck:
 
@@ -31,7 +31,7 @@ docker compose -f docker-compose.prod.yml up -d postgres
 docker compose -f docker-compose.prod.yml run --rm app npm run db:migrate
 ```
 
-5. Confirmar que a migration `012_achievements_unique.sql` aparece em `schema_migrations`; validar as FKs `NOT VALID` e rever nomes legados ajustados. Índices únicos bloqueiam novas duplicatas e duplicação no histórico de conquistas.
+5. Confirmar que a migration `013_dashboard_history_indexes.sql` aparece em `schema_migrations`; validar as FKs `NOT VALID` e rever nomes legados ajustados. Índices únicos bloqueiam novas duplicatas e duplicação no histórico de conquistas.
 6. Subir o servico e conferir `/health`, `/health/db`, logs e um fluxo de autenticacao real:
 
 ```bash
@@ -41,6 +41,14 @@ docker compose -f docker-compose.prod.yml logs --tail=100 app
 ```
 
 7. Monitorar erros, latencia, conexoes do pool e armazenamento; manter procedimento de rollback para a imagem. Migrations futuras devem ser aditivas e compativeis com a versao anterior durante deploy gradual.
+
+## Teste temporario em Render
+
+O arquivo `render.yaml` cria um web service Node e um PostgreSQL separados na regiao Ohio. O blueprint foi preparado para um teste curto com codigos visiveis: `TEMPORARY_OTP_DISPLAY=true` permite envio simulado em producao e mostra os codigos ao usuario. Isso **nao e autenticacao multifator**; qualquer pessoa com a senha pode concluir o login. Os limites por IP tambem sao aumentados no blueprint para acomodar participantes na mesma rede; mantenha esses valores apenas durante o piloto. Desligue a flag temporaria e remova os overrides de rate limit ao encerrar o teste (ou depois de configurar email real).
+
+O plano gratuito do Render coloca o web service em sleep depois de 15 minutos sem trafego, tem filesystem efemero (uploads podem desaparecer) e o PostgreSQL gratuito expira apos 30 dias. Nao use o banco gratuito para guardar dados que precisem ser mantidos. O banco do blueprint e novo e vazio; ele nao copia os dados do PostgreSQL local.
+
+Para publicar, envie este arquivo e as alteracoes para uma branch do GitHub, crie um Blueprint no Render apontando para essa branch e informe um `MASTER_PASSWORD` forte quando solicitado. O deploy executa `npm run db:migrate` antes de iniciar o servidor. Depois, confira `/health` e faca um cadastro/login de ponta a ponta. O Render fornece a URL `onrender.com`; CORS e links de recuperacao usam `RENDER_EXTERNAL_URL` automaticamente.
 
 ## Hardening implementado
 
