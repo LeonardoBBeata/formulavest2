@@ -11,6 +11,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="study-tracker.js" defer></script>
   <script src="exam-validation.js" defer></script>
+  <script src="lesson-quizzes.js" defer></script>
   <script src="script.js" defer></script>
 
   <style>
@@ -75,6 +76,7 @@
 
     <ul>
       <li data-section="inicio" class="active">🏠 Início</li>
+      <li data-section="licoes">📚 Lições</li>
       <li data-section="enem">🧠 Simulado ENEM</li>
       <li data-section="provao">📘 Provão Paulista</li>
       <li data-section="personalizadas">🎯 Provas personalizadas</li>
@@ -216,6 +218,199 @@
           </div>
         </div>
       </section>
+    </section>
+
+    <!-- LIÇÕES -->
+    <section id="licoes" class="section hidden">
+      <div class="lessons-heading">
+        <p class="eyebrow">Aprenda no seu ritmo</p>
+        <h1>📚 Lições</h1>
+        <p>Revisões rápidas com conceitos essenciais e exemplos para cada matéria.</p>
+      </div>
+
+      <nav class="lesson-subject-nav" aria-label="Matérias das lições">
+        <button class="lesson-filter-button is-active" type="button" data-lesson-subject="all" aria-pressed="true">Todas</button>
+        <button class="lesson-filter-button" type="button" data-lesson-subject="portugues" aria-pressed="false">Português</button>
+        <button class="lesson-filter-button" type="button" data-lesson-subject="matematica" aria-pressed="false">Matemática</button>
+        <button class="lesson-filter-button" type="button" data-lesson-subject="historia" aria-pressed="false">História</button>
+        <button class="lesson-filter-button" type="button" data-lesson-subject="geografia" aria-pressed="false">Geografia</button>
+        <button class="lesson-filter-button" type="button" data-lesson-subject="ingles" aria-pressed="false">Inglês</button>
+      </nav>
+
+      <div class="lesson-subject-grid">
+        <article id="licoes-portugues" class="card lesson-subject" data-lesson-subject="portugues">
+          <div class="lesson-subject-heading">
+            <span aria-hidden="true">📖</span>
+            <div>
+              <h2>Português</h2>
+              <p>Leitura e construção de sentido</p>
+              <span class="lesson-subject-progress" data-subject-progress="portugues">0/2 lições concluídas</span>
+            </div>
+          </div>
+          <details class="lesson-item" data-lesson-id="tese-argumentos">
+            <summary><span>Tese e argumentos</span><span class="lesson-time">5 min</span></summary>
+            <div class="lesson-body">
+              <p>A tese é a ideia central que um texto argumentativo defende. Os argumentos explicam por que essa ideia merece ser aceita.</p>
+              <ul>
+                <li>Encontre o assunto e pergunte: qual posição o autor assume?</li>
+                <li>Separe a opinião principal das justificativas e dos exemplos.</li>
+                <li>Dados, comparações e fatos podem funcionar como evidências.</li>
+              </ul>
+              <p><strong>Exemplo:</strong> “A leitura deve ser incentivada nas escolas, pois amplia o vocabulário e fortalece a interpretação.” A primeira parte apresenta a tese; a segunda traz argumentos.</p>
+            </div>
+          </details>
+          <details class="lesson-item" data-lesson-id="conectivos-coesao">
+            <summary><span>Conectivos e coesão</span><span class="lesson-time">4 min</span></summary>
+            <div class="lesson-body">
+              <p>Conectivos mostram como as ideias se relacionam e ajudam o leitor a acompanhar o raciocínio.</p>
+              <ul>
+                <li><strong>Causa:</strong> porque, já que, visto que.</li>
+                <li><strong>Contraste:</strong> mas, porém, entretanto.</li>
+                <li><strong>Conclusão:</strong> portanto, assim, desse modo.</li>
+              </ul>
+              <p>Ao interpretar um conectivo, observe o sentido da frase inteira: “Estudou bastante, portanto estava preparado” indica conclusão.</p>
+            </div>
+          </details>
+        </article>
+
+        <article id="licoes-matematica" class="card lesson-subject" data-lesson-subject="matematica">
+          <div class="lesson-subject-heading">
+            <span aria-hidden="true">➗</span>
+            <div>
+              <h2>Matemática</h2>
+              <p>Conceitos e resolução de problemas</p>
+              <span class="lesson-subject-progress" data-subject-progress="matematica">0/2 lições concluídas</span>
+            </div>
+          </div>
+          <details class="lesson-item" data-lesson-id="porcentagem">
+            <summary><span>Porcentagem no dia a dia</span><span class="lesson-time">5 min</span></summary>
+            <div class="lesson-body">
+              <p>Porcentagem representa uma parte de 100. Para calcular <em>p%</em> de um valor, transforme o percentual em decimal e multiplique.</p>
+              <p><strong>Exemplo:</strong> 20% de 150 = 0,20 × 150 = 30.</p>
+              <ul>
+                <li>Aumento de 10%: multiplique o valor por 1,10.</li>
+                <li>Desconto de 10%: multiplique o valor por 0,90.</li>
+                <li>Compare sempre o percentual com a base sobre a qual ele foi calculado.</li>
+              </ul>
+            </div>
+          </details>
+          <details class="lesson-item" data-lesson-id="funcao-primeiro-grau">
+            <summary><span>Função do primeiro grau</span><span class="lesson-time">6 min</span></summary>
+            <div class="lesson-body">
+              <p>Uma função do primeiro grau tem a forma <strong>f(x) = ax + b</strong>, com <em>a ≠ 0</em>. Seu gráfico é uma reta.</p>
+              <ul>
+                <li><em>a</em> indica a inclinação: positiva, a reta cresce; negativa, decresce.</li>
+                <li><em>b</em> é o valor em que a reta cruza o eixo vertical.</li>
+                <li>A raiz é o valor de <em>x</em> para o qual <em>f(x) = 0</em>.</li>
+              </ul>
+              <p><strong>Exemplo:</strong> em 2x + 4 = 0, temos x = −2.</p>
+            </div>
+          </details>
+        </article>
+
+        <article id="licoes-historia" class="card lesson-subject" data-lesson-subject="historia">
+          <div class="lesson-subject-heading">
+            <span aria-hidden="true">🏛️</span>
+            <div>
+              <h2>História</h2>
+              <p>Contextos, mudanças e permanências</p>
+              <span class="lesson-subject-progress" data-subject-progress="historia">0/2 lições concluídas</span>
+            </div>
+          </div>
+          <details class="lesson-item" data-lesson-id="revolucao-industrial">
+            <summary><span>Revolução Industrial</span><span class="lesson-time">5 min</span></summary>
+            <div class="lesson-body">
+              <p>Iniciada na Inglaterra no século XVIII, a Revolução Industrial transformou a produção artesanal em produção mecanizada e concentrada em fábricas.</p>
+              <ul>
+                <li>Máquinas a vapor e uso do carvão ampliaram a capacidade produtiva.</li>
+                <li>A industrialização acelerou a urbanização e o trabalho assalariado.</li>
+                <li>Jornadas longas e condições difíceis levaram à organização de trabalhadores.</li>
+              </ul>
+              <p>Para analisar o tema, relacione inovação tecnológica, mudanças sociais e impactos no espaço urbano.</p>
+            </div>
+          </details>
+          <details class="lesson-item" data-lesson-id="abolicao-pos-abolicao">
+            <summary><span>Abolição e pós-abolição no Brasil</span><span class="lesson-time">5 min</span></summary>
+            <div class="lesson-body">
+              <p>A Lei Áurea, de 1888, aboliu juridicamente a escravidão no Brasil. A liberdade, porém, não foi acompanhada de políticas amplas de acesso à terra, educação e trabalho digno.</p>
+              <ul>
+                <li>A abolição foi resultado de décadas de resistência negra e mobilização social.</li>
+                <li>A população liberta enfrentou exclusão e barreiras econômicas e sociais.</li>
+                <li>O período ajuda a compreender a persistência de desigualdades no país.</li>
+              </ul>
+              <p>Uma boa análise histórica considera tanto a lei quanto as condições reais de vida depois dela.</p>
+            </div>
+          </details>
+        </article>
+
+        <article id="licoes-geografia" class="card lesson-subject" data-lesson-subject="geografia">
+          <div class="lesson-subject-heading">
+            <span aria-hidden="true">🌍</span>
+            <div>
+              <h2>Geografia</h2>
+              <p>Espaço, território e sociedade</p>
+              <span class="lesson-subject-progress" data-subject-progress="geografia">0/2 lições concluídas</span>
+            </div>
+          </div>
+          <details class="lesson-item" data-lesson-id="escala-cartografica">
+            <summary><span>Escala cartográfica</span><span class="lesson-time">4 min</span></summary>
+            <div class="lesson-body">
+              <p>A escala compara uma distância representada no mapa com a distância real. Na escala numérica 1:100.000, cada 1 cm no mapa corresponde a 100.000 cm no terreno, ou 1 km.</p>
+              <ul>
+                <li>Converta as medidas para a mesma unidade antes de calcular.</li>
+                <li>Escala grande mostra uma área menor com mais detalhes.</li>
+                <li>Escala pequena representa áreas maiores com menos detalhes.</li>
+              </ul>
+            </div>
+          </details>
+          <details class="lesson-item" data-lesson-id="urbanizacao-rede-urbana">
+            <summary><span>Urbanização e rede urbana</span><span class="lesson-time">5 min</span></summary>
+            <div class="lesson-body">
+              <p>Urbanização é o crescimento da população que vive em cidades e das áreas urbanas. Ela pode ocorrer rapidamente quando há migração e concentração de empregos e serviços.</p>
+              <ul>
+                <li>A rede urbana conecta cidades por fluxos de pessoas, mercadorias e informação.</li>
+                <li>As cidades exercem influências diferentes conforme a oferta de serviços e empregos.</li>
+                <li>O crescimento urbano sem planejamento pode ampliar desigualdades e problemas de mobilidade.</li>
+              </ul>
+            </div>
+          </details>
+        </article>
+
+        <article id="licoes-ingles" class="card lesson-subject" data-lesson-subject="ingles">
+          <div class="lesson-subject-heading">
+            <span aria-hidden="true">🗣️</span>
+            <div>
+              <h2>Inglês</h2>
+              <p>Vocabulário e estruturas essenciais</p>
+              <span class="lesson-subject-progress" data-subject-progress="ingles">0/2 lições concluídas</span>
+            </div>
+          </div>
+          <details class="lesson-item" data-lesson-id="simple-present">
+            <summary><span>Simple Present</span><span class="lesson-time">5 min</span></summary>
+            <div class="lesson-body">
+              <p>O Simple Present é usado para hábitos, rotinas e fatos gerais. Com <em>he, she</em> ou <em>it</em>, o verbo normalmente recebe <em>-s</em> ou <em>-es</em>.</p>
+              <ul>
+                <li><strong>I study</strong> every day. (Eu estudo todos os dias.)</li>
+                <li><strong>She studies</strong> every day. (Ela estuda todos os dias.)</li>
+                <li>Em perguntas e negativas, use <em>do/does</em>: “Does she study?”</li>
+              </ul>
+              <p>Depois de <em>does</em>, o verbo principal volta à forma base: “Does she studies?” está incorreto.</p>
+            </div>
+          </details>
+          <details class="lesson-item" data-lesson-id="false-friends">
+            <summary><span>False friends</span><span class="lesson-time">4 min</span></summary>
+            <div class="lesson-body">
+              <p>False friends são palavras parecidas com termos em português, mas com significados diferentes.</p>
+              <ul>
+                <li><em>Actually</em> significa “na verdade”, não “atualmente”.</li>
+                <li><em>Pretend</em> significa “fingir”, não “pretender”.</li>
+                <li><em>Parents</em> significa “pais”, não “parentes”.</li>
+              </ul>
+              <p>Use o contexto da frase para confirmar o significado antes de traduzir uma palavra parecida.</p>
+            </div>
+          </details>
+        </article>
+      </div>
     </section>
 
     <!-- ENEM -->
