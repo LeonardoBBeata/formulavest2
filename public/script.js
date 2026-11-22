@@ -758,10 +758,7 @@ async function gerarProvaAluno({ endpoint, containerId, finalizarId, botaoId }) 
       throw new Error("A prova foi gerada sem questoes validas");
     }
 
-    const questoesValidas = data.questoes.filter((questao) => {
-      if (!questao || typeof questao !== 'object') return false;
-      return Boolean(questao.enunciado) && Boolean(questao.opcoes) && ['A', 'B', 'C', 'D', 'E'].includes(String(questao.correta || '').toUpperCase());
-    });
+    const questoesValidas = data.questoes.filter(ExamValidation.isValidStudentQuestion);
 
     if (questoesValidas.length < data.questoes.length) {
       throw new Error('A prova gerada está incompleta ou inválida. Tente novamente.');
