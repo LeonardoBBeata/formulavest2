@@ -1,9 +1,9 @@
 const axios = require('axios');
 
 const MODELOS_FALLBACK = [
-  'openrouter/free',
-  'openai/gpt-oss-20b:free',
-  'meta-llama/llama-3.1-8b-instruct:free'
+  'baidu/ernie-5.5-flash-preview:free',
+  'google/gemma-4-31b-it:free',
+  'openrouter/free'
 ];
 
 function isPaidModel(modelo = '') {

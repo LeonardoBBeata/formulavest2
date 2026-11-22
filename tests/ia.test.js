@@ -8,7 +8,7 @@ describe('OpenRouter fallback', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.OPENROUTER_API_KEY = 'teste-key';
-    process.env.OPENROUTER_MODEL = 'openrouter/free';
+    process.env.OPENROUTER_MODEL = 'baidu/ernie-5.5-flash-preview:free';
   });
 
   test('deve tentar um modelo válido quando o padrão configurado falha', async () => {
@@ -24,13 +24,16 @@ describe('OpenRouter fallback', () => {
 
     expect(response).toBe('{"ok": true}');
     expect(axios.post).toHaveBeenCalledTimes(2);
-    expect(axios.post.mock.calls[0][1].model).toBe('openrouter/free');
+    expect(axios.post.mock.calls[0][1].model).toBe('baidu/ernie-5.5-flash-preview:free');
   });
 
   test('deve manter um conjunto de modelos válidos como fallback', () => {
     const modelos = obterModelos();
-    expect(modelos[0]).toBe('openrouter/free');
-    expect(modelos).toContain('openai/gpt-oss-20b:free');
+    expect(modelos[0]).toBe('baidu/ernie-5.5-flash-preview:free');
+    expect(modelos).toContain('google/gemma-4-31b-it:free');
+    expect(modelos).toContain('openrouter/free');
+    expect(modelos).not.toContain('openai/gpt-oss-20b:free');
+    expect(modelos).not.toContain('meta-llama/llama-3.1-8b-instruct:free');
     expect(modelos.every(modelo => !/gpt-4|claude|sonnet|haiku|gemini-2\.|deepseek-r1|reasoning/i.test(modelo))).toBe(true);
   });
 
