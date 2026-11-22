@@ -1,6 +1,19 @@
 const API = window.location.origin;
 const token = null;
 const hasSession = localStorage.getItem('auth_session') === '1';
+const FOCUS_DURATION_SECONDS = 25 * 60;
+const ACTIVITY_STORAGE_KEY = 'studyActivityLog';
+const FOCUS_STORAGE_KEY = 'studyFocusTimer';
+const DEFAULT_PLAN = [
+  'Revisar 10 questões de matemática',
+  'Estudar redação por 20 minutos',
+  'Fazer uma revisão rápida de português'
+];
+const DEFAULT_GOALS = [
+  { texto: 'Completar 1 simulado', feito: false, kind: 'exam' },
+  { texto: 'Corrigir uma redação', feito: false, kind: 'essay' },
+  { texto: 'Revisar questões erradas', feito: false, kind: 'manual' }
+];
 
 if (!hasSession) window.location.href = "/login.html";
 
@@ -12,7 +25,10 @@ let provaId = null;
 let respostasUser = {};
 let grafico = null;
 let focoTimer = null;
-let focoSegundos = 25 * 60;
+let focoSegundos = FOCUS_DURATION_SECONDS;
+let focoDeadline = null;
+let studyActivities = carregarArrayLocalStorage(ACTIVITY_STORAGE_KEY);
+const StudyTracker = window.StudyTracker;
 function carregarArrayLocalStorage(chave) {
   const armazenado = localStorage.getItem(chave);
   if (!armazenado) return [];
@@ -74,7 +90,7 @@ function syncAchievementLocalState({ provas, xp, nivel, streak, provaPerfeita })
   const totalProvas = Number(provas || localStorage.getItem('provasConcluidas') || 0);
   const totalXp = Number(xp || localStorage.getItem('xpTotal') || 0);
   const nivelAtual = Number(nivel || localStorage.getItem('nivelAtual') || 1);
-  const streakAtual = Number(streak || localStorage.getItem('streak') || 0);
+  const streakAtual = Number.isFinite(Number(streak)) ? Number(streak) : Number(localStorage.getItem('streak') || 0);
 
   localStorage.setItem('provasConcluidas', String(Math.max(0, totalProvas)));
   localStorage.setItem('xpTotal', String(Math.max(0, totalXp)));
@@ -86,36 +102,6 @@ function syncAchievementLocalState({ provas, xp, nivel, streak, provaPerfeita })
 // ======================
 // INIT
 // ======================
-function sincronizarMetasComProgresso(totalProvas = Number(localStorage.getItem("provasConcluidas") || 0)) {
-  if (!Array.isArray(metas) || !metas.length) {
-    metas = [
-      { texto: "Completar 1 simulado", feito: false },
-      { texto: "Estudar redação", feito: false },
-      { texto: "Revisar erradas", feito: false }
-    ];
-  }
-
-  metas = metas.map((meta, index) => {
-    const texto = String(meta.texto || '').toLowerCase();
-    let feito = Boolean(meta.feito);
-
-    if (texto.includes('simulado')) feito = totalProvas >= 1;
-    else if (texto.includes('redação') || texto.includes('redacao')) feito = totalProvas >= 2;
-    else if (texto.includes('erradas') || texto.includes('revisar')) feito = totalProvas >= 3;
-
-    if (index === 0 && !texto.includes('simulado') && !texto.includes('redacao') && !texto.includes('erradas') && !texto.includes('revisar')) {
-      feito = totalProvas >= 1;
-    }
-
-    return { ...meta, feito };
-  });
-
-  localStorage.setItem("metas", JSON.stringify(metas));
-  localStorage.setItem("provasConcluidas", String(Math.max(0, totalProvas)));
-  renderMetas();
-  atualizarResumo();
-}
-
 window.addEventListener("DOMContentLoaded", () => {
   aplicarTema(temaAtual);
   inicializarConfiguracoes();
@@ -125,6 +111,7 @@ window.addEventListener("DOMContentLoaded", () => {
   configurarBotoes();
   configurarLogout();
   inicializarPlanejamento();
+  inicializarModoFoco();
   inicializarAcompanhamento();
   inicializarNotificacoes();
   inicializarBoasVindas();
@@ -196,8 +183,16 @@ function configurarBotoes() {
 
   el("enviar-redacao")?.addEventListener("click", corrigirRedacao);
   el("iniciar-foco-btn")?.addEventListener("click", iniciarModoFoco);
+  el("pausar-foco-btn")?.addEventListener("click", pausarModoFoco);
+  el("reset-foco-btn")?.addEventListener("click", reiniciarModoFoco);
   el("adicionar-meta-btn")?.addEventListener("click", adicionarMeta);
   el("marcar-sessao-btn")?.addEventListener("click", marcarSessao);
+  el("plano-dia-form")?.addEventListener("submit", adicionarItemPlano);
+  el("meta-form")?.addEventListener("submit", adicionarMetaDoFormulario);
+  el("plano-dia-list")?.addEventListener("change", alterarEstadoPlano);
+  el("metas-list")?.addEventListener("change", alterarEstadoMeta);
+  el("plano-dia-list")?.addEventListener("click", removerItemPlano);
+  el("metas-list")?.addEventListener("click", removerMeta);
   el("theme-toggle")?.addEventListener("click", alternarTema);
   el("notify-btn")?.addEventListener("click", alternarNotificacoes);
   el("mobile-menu-btn")?.addEventListener("click", alternarMenuLateral);
@@ -448,7 +443,6 @@ async function carregarDashboard() {
     const melhor = Number(resumo.melhor_percentual || 0);
 
     localStorage.setItem("provasConcluidas", String(Math.max(0, total)));
-    sincronizarMetasComProgresso(total);
 
     const container = el("dashboard-container");
     if (container) {
@@ -468,7 +462,7 @@ async function carregarDashboard() {
     if (el("xp-total")) el("xp-total").innerText = `${xp} XP`;
     if (el("xp-bar-fill")) el("xp-bar-fill").style.width = `${xpNoNivel}%`;
     if (el("stat-acertos")) el("stat-acertos").innerText = `${media.toFixed(0)}%`;
-    if (el("stat-sessoes")) el("stat-sessoes").innerText = total;
+    atualizarResumo();
   } catch (error) {
     console.error(error);
     const container = el("dashboard-container");
@@ -580,22 +574,36 @@ async function carregarTrilhaMaterias() {
       ['portugues', 'prog-portugues', 'fill-portugues'],
       ['redacao', 'prog-redacao', 'fill-redacao']
     ];
+    let areasComDados = 0;
 
     materias.forEach(([key, labelId, fillId]) => {
       const percentual = Math.min(100, Math.max(0, Number(data.percentuais?.[key] || 0)));
+      const tentativas = Math.max(0, Number(data.totais?.[key] || 0));
       const label = el(labelId);
       const fill = el(fillId);
-      if (label) label.textContent = `${percentual}%`;
+      if (tentativas > 0) areasComDados += 1;
+      if (label) label.textContent = tentativas > 0 ? `${percentual}%` : 'Sem dados';
       if (fill) {
         fill.style.width = `${percentual}%`;
         fill.setAttribute('role', 'progressbar');
         fill.setAttribute('aria-valuemin', '0');
         fill.setAttribute('aria-valuemax', '100');
         fill.setAttribute('aria-valuenow', String(percentual));
+        fill.setAttribute('aria-valuetext', tentativas > 0
+          ? `${percentual}% em ${tentativas} atividade(s)`
+          : 'Sem atividades respondidas');
       }
     });
+    const status = el('trilha-status');
+    if (status) {
+      status.textContent = areasComDados
+        ? 'Percentuais calculados com base nas suas respostas e redações corrigidas.'
+        : 'Conclua um simulado ou corrija uma redação para começar sua trilha.';
+    }
   } catch (error) {
     console.error(error);
+    const status = el('trilha-status');
+    if (status) status.textContent = 'Não foi possível carregar sua trilha agora.';
   }
 }
 
@@ -881,8 +889,10 @@ async function salvarResultado() {
     const provasConcluidas = Number(localStorage.getItem("provasConcluidas") || 0) + 1;
     const xpTotal = Number(localStorage.getItem('xpTotal') || 0) + Number(data.xp_ganho || 0);
     const nivelAtual = Number(data.nivel || Number(localStorage.getItem('nivelAtual') || 1));
-    const streakAtual = Number(localStorage.getItem('streak') || 0) + 1;
     const provaPerfeita = Number(data.percentual || 0) >= 100;
+    recordStudyActivity('exam');
+    concluirMetasPorTipo('exam');
+    const streakAtual = StudyTracker.summarize(studyActivities).streak;
 
     syncAchievementLocalState({
       provas: provasConcluidas,
@@ -893,7 +903,6 @@ async function salvarResultado() {
     });
 
     localStorage.setItem("provasConcluidas", String(Math.max(0, provasConcluidas)));
-    sincronizarMetasComProgresso(provasConcluidas);
 
     limparSessaoProva();
     mostrarResultadoDaProva(data);
@@ -944,153 +953,449 @@ function mostrarResultadoDaProva(data) {
 // REDAÇÃO
 // ======================
 async function corrigirRedacao() {
-  const tema = el("tema-redacao").value;
-  const texto = el("texto-redacao").value;
+  const botao = el("enviar-redacao");
+  const feedback = el("feedback-redacao");
+  if (botao) botao.disabled = true;
 
-  const res = await fetch(`${API}/corrigir-redacao`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`
-    },
-    body: JSON.stringify({ tema, texto })
-  });
+  try {
+    const tema = el("tema-redacao").value;
+    const texto = el("texto-redacao").value;
+    const res = await fetch(`${API}/corrigir-redacao`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ tema, texto })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Não foi possível corrigir a redação.');
 
-  const data = await res.json();
-
-  el("feedback-redacao").innerText =
-    `Nota: ${data.nota_total}\n${data.feedback}`;
+    if (feedback) feedback.textContent = `Nota: ${data.nota_total}\n${data.feedback || ''}`;
+    recordStudyActivity('essay');
+    concluirMetasPorTipo('essay');
+  } catch (error) {
+    console.error(error);
+    if (feedback) feedback.textContent = error.message || 'Não foi possível corrigir a redação.';
+  } finally {
+    if (botao) botao.disabled = false;
+  }
 }
 
 // ======================
-// STREAK
+// ROTINA DE ESTUDOS
 // ======================
+function obterResumoAtividades() {
+  return StudyTracker.summarize(studyActivities);
+}
+
 function atualizarStreak() {
-  const streak = Number(localStorage.getItem("streak") || 0);
-  el("streak-days").innerText = `${streak} dias 🔥`;
-  el("hero-streak").innerText = `${streak} dias`;
+  const streak = obterResumoAtividades().streak;
+  localStorage.setItem('streak', String(streak));
+  if (el("streak-days")) el("streak-days").textContent = `${streak} dias 🔥`;
+  if (el("hero-streak")) el("hero-streak").textContent = `${streak} dias`;
+}
+
+function normalizarItemPlano(item) {
+  const texto = typeof item === 'string' ? item : item?.texto || item?.text || '';
+  return { texto: String(texto).trim().slice(0, 120), feito: typeof item === 'object' && item?.feito === true };
+}
+
+function tipoAutomaticoDaMeta(texto) {
+  const normalizado = String(texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (/simulado|prova/.test(normalizado)) return 'exam';
+  if (/redacao/.test(normalizado)) return 'essay';
+  return 'manual';
+}
+
+function normalizarMeta(meta) {
+  const texto = String(meta?.texto || '').trim().slice(0, 100);
+  const kind = ['exam', 'essay', 'manual'].includes(meta?.kind) ? meta.kind : tipoAutomaticoDaMeta(texto);
+  return { texto, feito: meta?.feito === true, kind };
+}
+
+function salvarPlanejamento() {
+  localStorage.setItem('planoDia', JSON.stringify(planoDia));
+  localStorage.setItem('metas', JSON.stringify(metas));
 }
 
 function inicializarPlanejamento() {
-  if (!planoDia.length) {
-    planoDia = [
-      "Revisar 10 questões de matemática",
-      "Estudar redação por 20 minutos",
-      "Fazer uma revisão rápida de português"
-    ];
-    localStorage.setItem("planoDia", JSON.stringify(planoDia));
+  const hoje = StudyTracker.dateKey();
+  const planoSalvo = localStorage.getItem('planoDia');
+  const metasSalvas = localStorage.getItem('metas');
+  const dataPlano = localStorage.getItem('planoDiaDate');
+  const dataMetas = localStorage.getItem('metasDate');
+
+  if (dataPlano && dataPlano !== hoje) {
+    planoDia = DEFAULT_PLAN.map(texto => ({ texto, feito: false }));
+  } else if (planoSalvo !== null) {
+    planoDia = carregarArrayLocalStorage('planoDia')
+      .map(normalizarItemPlano)
+      .filter(item => item.texto);
+    if (!dataPlano) planoDia = planoDia.map(item => ({ ...item, feito: false }));
+  } else {
+    planoDia = DEFAULT_PLAN.map(texto => ({ texto, feito: false }));
   }
 
-  if (!metas.length) {
-    metas = [
-      { texto: "Completar 1 simulado", feito: false },
-      { texto: "Estudar redação", feito: false },
-      { texto: "Revisar erradas", feito: false }
-    ];
-    localStorage.setItem("metas", JSON.stringify(metas));
+  if (dataMetas && dataMetas !== hoje) {
+    metas = DEFAULT_GOALS.map(meta => ({ ...meta }));
+  } else if (metasSalvas !== null) {
+    metas = carregarArrayLocalStorage('metas')
+      .map(normalizarMeta)
+      .filter(meta => meta.texto);
+    if (!dataMetas) metas = metas.map(meta => ({ ...meta, feito: false }));
+  } else {
+    metas = DEFAULT_GOALS.map(meta => ({ ...meta }));
   }
 
-  sincronizarMetasComProgresso(Number(localStorage.getItem("provasConcluidas") || 0));
+  localStorage.setItem('planoDiaDate', hoje);
+  localStorage.setItem('metasDate', hoje);
+  salvarPlanejamento();
+  const dataLabel = el('plano-dia-data');
+  if (dataLabel) {
+    dataLabel.textContent = new Intl.DateTimeFormat('pt-BR', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short'
+    }).format(new Date());
+  }
   renderPlanoDia();
+  renderMetas();
 }
 
 function renderPlanoDia() {
   const container = el("plano-dia-list");
   if (!container) return;
 
-  container.innerHTML = planoDia.map(item => `<li>✓ ${escapeHtml(item)}</li>`).join("");
+  container.innerHTML = planoDia.length
+    ? planoDia.map((item, index) => `
+      <li class="${item.feito ? 'study-item-done' : ''}">
+        <label class="study-item-label">
+          <input type="checkbox" data-plan-toggle="${index}" ${item.feito ? 'checked' : ''} aria-label="Concluir ${escapeHtml(item.texto)}">
+          <span>${escapeHtml(item.texto)}</span>
+        </label>
+        <button type="button" class="study-item-remove" data-remove-plan="${index}" aria-label="Remover atividade ${escapeHtml(item.texto)}">×</button>
+      </li>
+    `).join("")
+    : '<li class="empty-state">Adicione uma atividade para organizar seu dia.</li>';
 }
 
 function renderMetas() {
-  const concluidas = metas.filter(m => m.feito).length;
-  el("hero-meta").innerText = `${concluidas}/${metas.length}`;
-  el("hero-dica").innerText = concluidas === metas.length ? "Parabéns! Meta diária concluída." : "Uma pequena vitória por vez.";
+  const concluidas = metas.filter(meta => meta.feito).length;
+  if (el("hero-meta")) el("hero-meta").textContent = `${concluidas}/${metas.length}`;
+  if (el("metas-resumo")) el("metas-resumo").textContent = `${concluidas}/${metas.length}`;
+  if (el("hero-dica")) {
+    el("hero-dica").textContent = !metas.length
+      ? 'Adicione uma meta para hoje.'
+      : concluidas === metas.length
+        ? 'Todas as metas de hoje concluídas!'
+        : `Faltam ${metas.length - concluidas} meta(s) para hoje.`;
+  }
+  const container = el('metas-list');
+  if (!container) return;
+  container.innerHTML = metas.length
+    ? metas.map((meta, index) => `
+      <li class="${meta.feito ? 'study-item-done' : ''}">
+        <label class="study-item-label">
+          <input type="checkbox" data-goal-toggle="${index}" ${meta.feito ? 'checked' : ''} aria-label="Concluir meta ${escapeHtml(meta.texto)}">
+          <span>${escapeHtml(meta.texto)}</span>
+        </label>
+        <button type="button" class="study-item-remove" data-remove-goal="${index}" aria-label="Remover meta ${escapeHtml(meta.texto)}">×</button>
+      </li>
+    `).join("")
+    : '<li class="empty-state">Você ainda não adicionou metas para hoje.</li>';
 }
 
 function adicionarMeta() {
-  const texto = prompt("Qual meta você quer adicionar hoje?");
-  if (!texto) return;
+  el('meta-input')?.focus();
+}
 
-  metas.push({ texto, feito: false });
-  localStorage.setItem("metas", JSON.stringify(metas));
+function adicionarMetaDoFormulario(event) {
+  event.preventDefault();
+  const input = el('meta-input');
+  const texto = String(input?.value || '').trim().slice(0, 100);
+  if (!texto) return;
+  metas.push({ texto, feito: false, kind: tipoAutomaticoDaMeta(texto) });
+  salvarPlanejamento();
   renderMetas();
+  input.value = '';
+  atualizarResumo();
+}
+
+function adicionarItemPlano(event) {
+  event.preventDefault();
+  const input = el('plano-dia-input');
+  const texto = String(input?.value || '').trim().slice(0, 120);
+  if (!texto) return;
+  planoDia.push({ texto, feito: false });
+  salvarPlanejamento();
+  renderPlanoDia();
+  input.value = '';
+  atualizarResumo();
+}
+
+function alterarEstadoPlano(event) {
+  const input = event.target.closest?.('[data-plan-toggle]');
+  const index = Number(input?.dataset.planToggle);
+  if (!input || !Number.isInteger(index) || !planoDia[index]) return;
+  planoDia[index].feito = input.checked;
+  salvarPlanejamento();
+  renderPlanoDia();
+  if (input.checked) recordStudyActivity('task');
+  else atualizarResumo();
+}
+
+function alterarEstadoMeta(event) {
+  const input = event.target.closest?.('[data-goal-toggle]');
+  const index = Number(input?.dataset.goalToggle);
+  if (!input || !Number.isInteger(index) || !metas[index]) return;
+  metas[index].feito = input.checked;
+  salvarPlanejamento();
+  renderMetas();
+  if (input.checked) recordStudyActivity('task');
+  else atualizarResumo();
+}
+
+function removerItemPlano(event) {
+  const button = event.target.closest?.('[data-remove-plan]');
+  if (!button) return;
+  const index = Number(button.dataset.removePlan);
+  if (!Number.isInteger(index) || !planoDia[index]) return;
+  planoDia.splice(index, 1);
+  salvarPlanejamento();
+  renderPlanoDia();
+  atualizarResumo();
+}
+
+function removerMeta(event) {
+  const button = event.target.closest?.('[data-remove-goal]');
+  if (!button) return;
+  const index = Number(button.dataset.removeGoal);
+  if (!Number.isInteger(index) || !metas[index]) return;
+  metas.splice(index, 1);
+  salvarPlanejamento();
+  renderMetas();
+  atualizarResumo();
+}
+
+function concluirMetasPorTipo(kind) {
+  let mudou = false;
+  metas = metas.map(meta => {
+    if (meta.kind !== kind || meta.feito) return meta;
+    mudou = true;
+    return { ...meta, feito: true };
+  });
+  if (mudou) {
+    salvarPlanejamento();
+    renderMetas();
+    atualizarResumo();
+  }
+}
+
+function salvarAtividades() {
+  if (studyActivities.length > 5000) studyActivities = studyActivities.slice(-5000);
+  localStorage.setItem(ACTIVITY_STORAGE_KEY, JSON.stringify(studyActivities));
+}
+
+function recordStudyActivity(kind, minutes = 0) {
+  studyActivities.push({
+    date: StudyTracker.dateKey(),
+    kind,
+    minutes: Math.max(0, Math.min(1440, Math.round(Number(minutes) || 0)))
+  });
+  salvarAtividades();
+  atualizarStreak();
+  atualizarResumo();
+  renderAcompanhamentoSemanal();
+}
+
+function renderAcompanhamentoSemanal() {
+  const stats = obterResumoAtividades();
+  const chart = el('weekly-chart');
+  const summary = el('weekly-summary');
+  const tip = el('weekly-tip');
+  const maxSessions = Math.max(1, ...stats.week.days.map(day => day.sessions));
+
+  if (chart) {
+    chart.innerHTML = stats.week.days.map(day => {
+      const height = day.sessions
+        ? Math.max(12, Math.round((day.sessions / maxSessions) * 100))
+        : day.active ? 8 : 0;
+      return `
+        <div class="weekly-day" title="${day.sessions} sessão(ões), ${day.minutes} min">
+          <div class="weekly-day-track">
+            <div class="weekly-day-fill ${day.active ? 'is-active' : ''}" style="height:${height}%"></div>
+          </div>
+          <span>${escapeHtml(day.label)}</span>
+          <span class="weekly-day-count">${day.sessions}</span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  if (summary) {
+    summary.textContent = `${stats.week.activeDays}/7 dias ativos · ${stats.week.sessions} sessões · ${stats.week.minutes} min registrados`;
+  }
+  if (tip) {
+    tip.textContent = stats.week.activeDays === 7
+      ? 'Excelente! Você estudou todos os dias desta semana.'
+      : stats.week.activeDays
+        ? `Você estudou em ${stats.week.activeDays} de 7 dias nesta semana. Continue no seu ritmo.`
+        : 'Ainda sem sessões nesta semana. Inicie o modo foco ou registre uma sessão.';
+  }
+}
+
+function atualizarResumo() {
+  const stats = obterResumoAtividades();
+  atualizarPainelEstatisticas();
+  const resumo = el("resumo-hoje");
+  if (!resumo) return;
+
+  const metasConcluidas = metas.filter(meta => meta.feito).length;
+  const planoConcluido = planoDia.filter(item => item.feito).length;
+  const proximaAtividade = planoDia.find(item => !item.feito);
+  const dica = proximaAtividade
+    ? `Próximo passo: ${proximaAtividade.texto}`
+    : planoDia.length
+      ? 'Seu plano do dia está concluído. Bom trabalho!'
+      : 'Adicione uma atividade ao plano do dia para começar.';
+
+  resumo.innerHTML = `
+    <div>📈 Metas de hoje: <strong>${metasConcluidas}/${metas.length}</strong></div>
+    <div>🗓️ Plano do dia: <strong>${planoConcluido}/${planoDia.length}</strong></div>
+    <div>⏱️ Hoje: <strong>${stats.today.sessions}</strong> sessão(ões) · <strong>${stats.today.minutes}</strong> min</div>
+    <div>🔥 Sequência: <strong>${stats.streak}</strong> dia(s)</div>
+    <div>💡 ${escapeHtml(dica)}</div>
+  `;
+}
+
+function atualizarPainelEstatisticas() {
+  const stats = obterResumoAtividades();
+  const concluidas = metas.filter(meta => meta.feito).length;
+  if (el("stat-sessoes")) el("stat-sessoes").textContent = stats.week.sessions;
+  if (el("stat-metas")) el("stat-metas").textContent = `${concluidas}/${metas.length}`;
+  if (el("stat-ritmo")) el("stat-ritmo").textContent = `${stats.streak} dias`;
+}
+
+function inicializarAcompanhamento() {
+  renderAcompanhamentoSemanal();
+  atualizarPainelEstatisticas();
+}
+
+function marcarSessao() {
+  recordStudyActivity('manual', 25);
+  mostrarToast('Sessão de 25 minutos registrada.');
+}
+
+function formatarTempoFoco() {
+  const mins = String(Math.floor(focoSegundos / 60)).padStart(2, '0');
+  const secs = String(focoSegundos % 60).padStart(2, '0');
+  if (el('focus-timer')) el('focus-timer').textContent = `${mins}:${secs}`;
+}
+
+function atualizarControlesFoco() {
+  const emAndamento = Boolean(focoTimer);
+  const iniciar = el('iniciar-foco-btn');
+  const pausar = el('pausar-foco-btn');
+  const status = el('focus-status');
+  if (iniciar) {
+    iniciar.disabled = emAndamento;
+    iniciar.textContent = emAndamento
+      ? '⏱ Foco em andamento'
+      : focoSegundos < FOCUS_DURATION_SECONDS
+        ? 'Retomar foco'
+        : '⏱ Iniciar foco 25 min';
+  }
+  if (pausar) pausar.disabled = !emAndamento;
+  if (status) {
+    status.textContent = emAndamento
+      ? 'Sessão em andamento. Você pode pausar quando precisar.'
+      : focoSegundos < FOCUS_DURATION_SECONDS
+        ? 'Sessão pausada. Retome quando estiver pronto.'
+        : 'Uma sessão de foco dura 25 minutos.';
+  }
+}
+
+function salvarEstadoFoco() {
+  localStorage.setItem(FOCUS_STORAGE_KEY, JSON.stringify(focoTimer
+    ? { running: true, deadline: focoDeadline }
+    : { running: false, remainingSeconds: focoSegundos }));
+}
+
+function atualizarRelogioFoco() {
+  focoSegundos = Math.max(0, Math.ceil((focoDeadline - Date.now()) / 1000));
+  formatarTempoFoco();
+  if (focoSegundos <= 0) concluirModoFoco();
+}
+
+function iniciarRelogioFoco() {
+  if (focoTimer) return;
+  focoTimer = setInterval(atualizarRelogioFoco, 250);
+  atualizarControlesFoco();
+}
+
+function inicializarModoFoco() {
+  let estado = null;
+  try {
+    estado = JSON.parse(localStorage.getItem(FOCUS_STORAGE_KEY) || 'null');
+  } catch (error) {
+    console.warn('Estado do modo foco inválido; iniciando uma sessão nova.', error);
+  }
+
+  if (estado?.running && Number.isFinite(Number(estado.deadline))) {
+    focoDeadline = Number(estado.deadline);
+    focoSegundos = Math.max(0, Math.ceil((focoDeadline - Date.now()) / 1000));
+    if (focoSegundos <= 0) {
+      concluirModoFoco();
+      return;
+    }
+    iniciarRelogioFoco();
+  } else if (Number.isFinite(Number(estado?.remainingSeconds))) {
+    focoSegundos = Math.max(0, Math.min(FOCUS_DURATION_SECONDS, Math.ceil(Number(estado.remainingSeconds))));
+  }
+
+  formatarTempoFoco();
+  atualizarControlesFoco();
 }
 
 function iniciarModoFoco() {
   if (focoTimer) return;
-
-  focoTimer = setInterval(() => {
-    focoSegundos -= 1;
-    const mins = String(Math.floor(focoSegundos / 60)).padStart(2, "0");
-    const secs = String(focoSegundos % 60).padStart(2, "0");
-    const timer = el("focus-timer");
-    if (timer) timer.innerText = `${mins}:${secs}`;
-
-    if (focoSegundos <= 0) {
-      clearInterval(focoTimer);
-      focoTimer = null;
-      focoSegundos = 25 * 60;
-      if (el("focus-timer")) el("focus-timer").innerText = "25:00";
-      alert("Sessão de foco concluída! Você merece uma pausa.");
-    }
-  }, 1000);
+  focoDeadline = Date.now() + focoSegundos * 1000;
+  salvarEstadoFoco();
+  iniciarRelogioFoco();
 }
 
-function atualizarResumo() {
-  const resumo = el("resumo-hoje");
-  if (!resumo) return;
-
-  const concluida = metas.filter(m => m.feito).length;
-  resumo.innerHTML = `
-    <div>📈 Progresso de metas: ${concluida}/${metas.length}</div>
-    <div>🎯 Estilo de estudo: foco e repetição</div>
-    <div>💡 Dica: finalize uma atividade por vez para manter o ritmo.</div>
-  `;
-  atualizarPainelEstatisticas();
+function pausarModoFoco() {
+  if (!focoTimer) return;
+  focoSegundos = Math.max(0, Math.ceil((focoDeadline - Date.now()) / 1000));
+  clearInterval(focoTimer);
+  focoTimer = null;
+  focoDeadline = null;
+  salvarEstadoFoco();
+  formatarTempoFoco();
+  atualizarControlesFoco();
 }
 
-function atualizarPainelEstatisticas() {
-  const sessoes = Number(localStorage.getItem("sessoesSemana") || 0);
-  const concluidas = metas.filter(m => m.feito).length;
-  const total = metas.length || 1;
-  const streak = Number(localStorage.getItem("streak") || 0);
-
-  el("stat-metas").innerText = `${concluidas}/${total}`;
-  el("stat-ritmo").innerText = `${streak} dias`;
+function reiniciarModoFoco() {
+  if (focoTimer) clearInterval(focoTimer);
+  focoTimer = null;
+  focoDeadline = null;
+  focoSegundos = FOCUS_DURATION_SECONDS;
+  salvarEstadoFoco();
+  formatarTempoFoco();
+  atualizarControlesFoco();
 }
 
-function inicializarAcompanhamento() {
-  const semana = Number(localStorage.getItem("sessoesSemana") || 0);
-  const tip = el("weekly-tip");
-  if (tip) {
-    tip.innerText = semana >= 5
-      ? "Excelente! Você manteve uma semana consistente de estudos."
-      : `Você registrou ${semana} sessões esta semana. Continue assim.`;
-  }
-
-  const progresso = [
-    { id: "matematica", valor: 68 },
-    { id: "portugues", valor: 54 },
-    { id: "redacao", valor: 41 }
-  ];
-
-  progresso.forEach(item => {
-    const label = el(`prog-${item.id}`);
-    const fill = el(`fill-${item.id}`);
-    if (label) label.innerText = `${item.valor}%`;
-    if (fill) fill.style.width = `${item.valor}%`;
-  });
-}
-
-function marcarSessao() {
-  const atual = Number(localStorage.getItem("sessoesSemana") || 0) + 1;
-  localStorage.setItem("sessoesSemana", atual);
-  const tip = el("weekly-tip");
-  if (tip) {
-    tip.innerText = `Sessão registrada! Total desta semana: ${atual}`;
-  }
-  atualizarPainelEstatisticas();
-  mostrarToast("Sessão adicionada ao seu planejamento.");
+function concluirModoFoco() {
+  if (focoTimer) clearInterval(focoTimer);
+  focoTimer = null;
+  focoDeadline = null;
+  focoSegundos = FOCUS_DURATION_SECONDS;
+  salvarEstadoFoco();
+  formatarTempoFoco();
+  atualizarControlesFoco();
+  recordStudyActivity('focus', 25);
+  mostrarToast('Sessão de foco concluída. Pausa merecida!');
 }
 
 function alternarTema() {

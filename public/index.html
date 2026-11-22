@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="site-theme.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="study-tracker.js" defer></script>
   <script src="script.js" defer></script>
 
   <style>
@@ -106,10 +107,13 @@
           <h1>Pratique com foco, acompanhe sua evolução e conquiste sua aprovação.</h1>
           <p>Organize sua rotina com simulados, metas diárias e um painel de progresso feito para estudar melhor.</p>
           <div class="hero-actions">
-            <button id="iniciar-foco-btn">⏱ Iniciar foco 25 min</button>
+            <button id="iniciar-foco-btn" type="button">⏱ Iniciar foco 25 min</button>
+            <button id="pausar-foco-btn" class="ghost-btn" type="button" disabled>Pausar</button>
+            <button id="reset-foco-btn" class="ghost-btn" type="button">Reiniciar foco</button>
             <button id="adicionar-meta-btn" class="ghost-btn">+ Adicionar meta</button>
             <button id="entrar-codigo-btn" class="ghost-btn">Entrar com código</button>
           </div>
+          <p id="focus-status" class="feature-status" role="status" aria-live="polite"></p>
         </div>
 
         <div class="hero-stats">
@@ -136,9 +140,22 @@
         <div class="card plan-card">
           <div class="section-title">
             <h3>Plano do dia</h3>
-            <span class="pill">Organize sua rotina</span>
+            <span class="pill" id="plano-dia-data">Hoje</span>
           </div>
+          <form id="plano-dia-form" class="study-entry-form">
+            <input id="plano-dia-input" type="text" maxlength="120" placeholder="Adicionar atividade ao plano" aria-label="Nova atividade para o plano de hoje" required>
+            <button type="submit">Adicionar</button>
+          </form>
           <ul id="plano-dia-list" class="plan-list"></ul>
+          <div class="section-title goals-title">
+            <h4>Metas de hoje</h4>
+            <span class="pill" id="metas-resumo">0/0</span>
+          </div>
+          <form id="meta-form" class="study-entry-form">
+            <input id="meta-input" type="text" maxlength="100" placeholder="Adicionar uma meta" aria-label="Nova meta para hoje" required>
+            <button type="submit">Adicionar</button>
+          </form>
+          <ul id="metas-list" class="plan-list goals-list"></ul>
         </div>
 
         <div class="card">
@@ -182,6 +199,7 @@
               <div class="progress-bar"><div id="fill-redacao" class="progress-fill" role="progressbar" aria-label="Progresso em Redação" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div>
             </div>
           </div>
+          <p id="trilha-status" class="feature-status" role="status" aria-live="polite">Carregando seu progresso por área...</p>
         </div>
 
         <div class="card">
@@ -191,7 +209,9 @@
           </div>
           <div class="weekly-card">
             <p id="weekly-tip">Sua semana está em andamento. Continue com pequenas sessões diárias.</p>
-            <button id="marcar-sessao-btn">+ Marcar sessão de estudo</button>
+            <p id="weekly-summary" class="weekly-summary"></p>
+            <div id="weekly-chart" class="weekly-chart" role="group" aria-label="Sessões de estudo por dia nesta semana"></div>
+            <button id="marcar-sessao-btn" type="button">+ Registrar sessão de 25 min</button>
           </div>
         </div>
       </section>
