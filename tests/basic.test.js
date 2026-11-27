@@ -13,6 +13,16 @@ describe('Basic server', () => {
     expect(res.headers['x-content-type-options']).toBe('nosniff');
   });
 
+  test('arquivos HTML e JavaScript do app não ficam presos em cache', async () => {
+    const [html, script] = await Promise.all([
+      request(app).get('/index.html'),
+      request(app).get('/script.js')
+    ]);
+
+    expect(html.headers['cache-control']).toContain('no-store');
+    expect(script.headers['cache-control']).toContain('no-store');
+  });
+
   test('rota inexistente não expõe páginas estáticas por engano', async () => {
     const res = await request(app).get('/nao-existe');
     expect(res.statusCode).toBe(404);

@@ -5,12 +5,12 @@ const registerProvasRoutes = require('../routes/provas');
 describe('rotas de geração assíncrona de provas', () => {
   let app;
   let savedJob;
-  const generatedQuestions = [{
-    enunciado: 'Questão de teste',
+  const generatedQuestions = Array.from({ length: 90 }, (_, index) => ({
+    enunciado: `Questão de teste ${index + 1}`,
     materia: 'Matemática',
     opcoes: { A: 'A', B: 'B', C: 'C', D: 'D', E: 'E' },
     correta: 'C'
-  }];
+  }));
 
   beforeEach(() => {
     savedJob = null;
@@ -80,6 +80,10 @@ describe('rotas de geração assíncrona de provas', () => {
 
     expect(conflict.status).toBe(409);
     expect(conflict.body.error).toMatch(/outra geração/i);
+    expect(conflict.body.active_job).toMatchObject({
+      job_id: expect.any(String),
+      type: 'enem'
+    });
   });
 
   test('retorna questões sem gabarito apenas ao dono da geração', async () => {
@@ -99,7 +103,7 @@ describe('rotas de geração assíncrona de provas', () => {
       .set('x-user-id', '2');
 
     expect(owner.status).toBe(200);
-    expect(owner.body.questoes).toHaveLength(1);
+    expect(owner.body.questoes).toHaveLength(90);
     expect(owner.body.questoes[0]).not.toHaveProperty('correta');
     expect(otherUser.status).toBe(404);
   });

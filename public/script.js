@@ -849,6 +849,8 @@ async function gerarProvaAluno({ endpoint, containerId, finalizarId, botaoId }) 
   const container = el(containerId);
   const botao = el(botaoId);
   const textoOriginal = botao?.textContent || "";
+  let botaoTarefaAtiva = null;
+  let textoBotaoTarefaAtiva = "";
 
   if (botao) {
     botao.disabled = true;
@@ -869,22 +871,41 @@ async function gerarProvaAluno({ endpoint, containerId, finalizarId, botaoId }) 
     });
 
     let data = await res.json().catch(() => ({}));
-    if (!res.ok) {
+    const activeJob = res.status === 409
+      && typeof data.active_job?.job_id === 'string'
+      && ['enem', 'provao'].includes(data.active_job.type)
+      ? data.active_job
+      : null;
+    if (!res.ok && !activeJob) {
       const message = res.status === 502 || res.status === 504
         ? 'A geração demorou mais que o limite do servidor. Tente novamente.'
         : data.error || "Nao foi possivel gerar a prova";
       throw new Error(message);
     }
-    if (res.status === 202 && data.job_id) {
-      const tipo = containerId === 'enem-container' ? 'ENEM' : 'Provão Paulista';
+    const jobId = activeJob?.job_id || data.job_id;
+    if ((res.status === 202 || activeJob) && jobId) {
+      const examType = activeJob?.type || (containerId === 'enem-container' ? 'enem' : 'provao');
+      const jobContainerId = examType === 'enem' ? 'enem-container' : 'provao-container';
+      const jobFinalizarId = examType === 'enem' ? 'finalizar-enem-btn' : 'finalizar-provao-btn';
+      const jobBotaoId = examType === 'enem' ? 'gerar-enem-btn' : 'gerar-provao-btn';
+      const jobContainer = el(jobContainerId);
+      botaoTarefaAtiva = el(jobBotaoId);
+      if (botaoTarefaAtiva && botaoTarefaAtiva !== botao) {
+        textoBotaoTarefaAtiva = botaoTarefaAtiva.textContent;
+        botaoTarefaAtiva.disabled = true;
+        botaoTarefaAtiva.textContent = 'Gerando...';
+      }
+      const tipo = examType === 'enem' ? 'ENEM' : 'Provão Paulista';
       localStorage.setItem(ACTIVE_EXAM_JOB_KEY, JSON.stringify({
-        jobId: data.job_id,
-        containerId,
-        finalizarId,
-        botaoId
+        jobId,
+        containerId: jobContainerId,
+        finalizarId: jobFinalizarId,
+        botaoId: jobBotaoId
       }));
-      renderLoadingProva(container, tipo, 'Sua solicitação está na fila. Aguarde um momento...');
-      data = await aguardarGeracaoProva(data.job_id, container, tipo);
+      if (jobContainer) renderLoadingProva(jobContainer, tipo, 'Sua solicitação está na fila. Aguarde um momento...');
+      data = await aguardarGeracaoProva(jobId, jobContainer, tipo);
+      containerId = jobContainerId;
+      finalizarId = jobFinalizarId;
     }
     if (!data.prova_id || !Array.isArray(data.questoes) || data.questoes.length === 0) {
       throw new Error("A prova foi gerada sem questoes validas");
@@ -902,6 +923,10 @@ async function gerarProvaAluno({ endpoint, containerId, finalizarId, botaoId }) 
     if (botao) {
       botao.disabled = false;
       botao.textContent = textoOriginal;
+    }
+    if (botaoTarefaAtiva && botaoTarefaAtiva !== botao) {
+      botaoTarefaAtiva.disabled = false;
+      botaoTarefaAtiva.textContent = textoBotaoTarefaAtiva;
     }
   }
 }

@@ -162,9 +162,15 @@ app.use('/uploads', express.static('public/uploads', {
 }));
 app.use(express.static('public', {
   maxAge: isProd ? 1000 * 60 * 60 * 24 * 7 : 0,
-  immutable: isProd,
+  immutable: false,
   index: false,
-  dotfiles: 'ignore'
+  dotfiles: 'ignore',
+  setHeaders: (res, filePath) => {
+    if (!/\.(html|js|css)$/i.test(filePath)) return;
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
 }));
 app.use(
   ['/register', '/verificar-email', '/forgot-password', '/reset-password', '/login-iniciar', '/login-confirmar'],

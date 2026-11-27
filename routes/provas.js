@@ -112,6 +112,13 @@ module.exports = function registerProvasRoutes(app, deps = {}) {
   }
 
   async function queueExamGeneration(userId, type) {
+    const activeJobConflict = job => {
+      const error = new Error('Você já tem outra geração de prova em andamento.');
+      error.status = 409;
+      error.activeJob = { id: job.id, type: job.tipo };
+      return error;
+    };
+
     const active = await db.query(`
       SELECT id, tipo
       FROM exam_generation_jobs
@@ -121,9 +128,7 @@ module.exports = function registerProvasRoutes(app, deps = {}) {
     `, [userId]);
     if (active.rows.length) {
       if (active.rows[0].tipo !== type) {
-        const error = new Error('Você já tem outra geração de prova em andamento.');
-        error.status = 409;
-        throw error;
+        throw activeJobConflict(active.rows[0]);
       }
       return active.rows[0].id;
     }
@@ -145,9 +150,7 @@ module.exports = function registerProvasRoutes(app, deps = {}) {
       `, [userId]);
       if (!current.rows.length) throw error;
       if (current.rows[0].tipo !== type) {
-        const conflict = new Error('Você já tem outra geração de prova em andamento.');
-        conflict.status = 409;
-        throw conflict;
+        throw activeJobConflict(current.rows[0]);
       }
       return current.rows[0].id;
     }
@@ -488,7 +491,8 @@ app.post('/gerar-provao', auth, aiLimiter, async (req, res) => {
   } catch (err) {
     if (err.status !== 409) console.error(err);
     res.status(err.status || 500).json({
-      error: err.status === 409 ? err.message : 'Não foi possível iniciar a geração do Provão Paulista.'
+      error: err.status === 409 ? err.message : 'Não foi possível iniciar a geração do Provão Paulista.',
+      active_job: err.activeJob ? { job_id: err.activeJob.id, type: err.activeJob.type } : undefined
     });
   }
 });
@@ -851,7 +855,8 @@ app.post('/gerar-enem', auth, aiLimiter, async (req, res) => {
   } catch (err) {
     if (err.status !== 409) console.error(err);
     res.status(err.status || 500).json({
-      error: err.status === 409 ? err.message : 'Não foi possível iniciar a geração do ENEM.'
+      error: err.status === 409 ? err.message : 'Não foi possível iniciar a geração do ENEM.',
+      active_job: err.activeJob ? { job_id: err.activeJob.id, type: err.activeJob.type } : undefined
     });
   }
 });
