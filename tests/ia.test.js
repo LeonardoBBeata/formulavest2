@@ -60,6 +60,14 @@ describe('OpenRouter fallback', () => {
     expect(axios.post.mock.calls[0][2].timeout).toBe(10000);
   });
 
+  test('não usa perguntas genéricas quando a geração exige resposta da IA', async () => {
+    delete process.env.OPENROUTER_API_KEY;
+
+    await expect(chamarIA('Crie 10 questões de Matemática', undefined, { allowFallback: false }))
+      .rejects.toThrow('OPENROUTER_API_KEY ausente');
+    expect(axios.post).not.toHaveBeenCalled();
+  });
+
   test('remove vírgulas finais antes de interpretar JSON da IA', () => {
     const { extrairJSONSeguro } = require('../services/ia');
 

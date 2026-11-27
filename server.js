@@ -234,6 +234,9 @@ async function startServer(port = PORT) {
   const dbReady = await initDB();
   if (dbReady) {
     await criarAdmMaster();
+    if (typeof app.locals.resumeExamGenerationJobs === 'function') {
+      await app.locals.resumeExamGenerationJobs();
+    }
   } else {
     logger.warn('Servidor iniciando sem banco de dados. Algumas rotas podem ficar indisponíveis até o PostgreSQL voltar.');
   }

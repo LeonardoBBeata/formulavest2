@@ -206,16 +206,21 @@ async function chamarIA(prompt, modelos = obterModelos(), options = {}) {
   const apiKey = String(process.env.OPENROUTER_API_KEY || '').trim();
 
   if (!apiKey) {
+    if (options.allowFallback === false) {
+      throw new Error('OPENROUTER_API_KEY ausente; não é possível gerar a prova com IA.');
+    }
     console.warn('OPENROUTER_API_KEY ausente. Usando fallback local para manter a geração funcionando sem modelo pago.');
     return gerarRespostaFallback(typeof prompt === 'string' ? prompt : '');
   }
 
   if (typeof prompt !== 'string' || !prompt.trim()) {
+    if (options.allowFallback === false) throw new Error('Prompt de IA vazio.');
     console.warn('Prompt de IA vazio. Usando fallback local para manter o fluxo estável.');
     return gerarRespostaFallback('');
   }
 
   if (prompt.length > 40000) {
+    if (options.allowFallback === false) throw new Error('Prompt de IA excedeu o limite permitido.');
     console.warn('Prompt de IA excedeu o limite. Usando fallback local em vez de interromper a geração.');
     return gerarRespostaFallback(prompt);
   }
@@ -243,7 +248,7 @@ async function chamarIA(prompt, modelos = obterModelos(), options = {}) {
           response_format: { type: 'json_object' },
           temperature: 0.2,
           top_p: 0.9,
-          max_tokens: 4000
+          max_tokens: options.maxTokens || 4000
         },
         {
           headers: {
@@ -282,8 +287,13 @@ async function chamarIA(prompt, modelos = obterModelos(), options = {}) {
   }
 
   if (ultimoErro?.response?.status === 404 && /unavailable for free/i.test(ultimoErro.response?.data?.error?.message || '')) {
+    if (options.allowFallback === false) throw ultimoErro;
     console.warn('OpenRouter indisponível para o modelo selecionado. Usando fallback local para manter a prova funcionando.');
     return gerarRespostaFallback(prompt);
+  }
+
+  if (options.allowFallback === false) {
+    throw ultimoErro || new Error('OpenRouter indisponível para gerar a prova.');
   }
 
   console.warn('OpenRouter indisponível ou sem créditos. Usando fallback local para continuar a geração da prova.');

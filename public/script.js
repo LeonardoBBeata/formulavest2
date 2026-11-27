@@ -4,6 +4,7 @@ const hasSession = localStorage.getItem('auth_session') === '1';
 const FOCUS_DURATION_SECONDS = 25 * 60;
 const ACTIVITY_STORAGE_KEY = 'studyActivityLog';
 const FOCUS_STORAGE_KEY = 'studyFocusTimer';
+const ACTIVE_EXAM_JOB_KEY = 'activeExamGenerationJob';
 const DEFAULT_PLAN = [
   'Revisar 10 questões de matemática',
   'Estudar redação por 20 minutos',
@@ -102,7 +103,12 @@ function syncAchievementLocalState({ provas, xp, nivel, streak, provaPerfeita })
 // ======================
 // INIT
 // ======================
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", async () => {
+  await StudyProgress.load();
+  studyActivities = carregarArrayLocalStorage(ACTIVITY_STORAGE_KEY);
+  metas = carregarArrayLocalStorage('metas');
+  planoDia = carregarArrayLocalStorage('planoDia');
+
   aplicarTema(temaAtual);
   inicializarConfiguracoes();
   aplicarEstadoMenuLateral();
@@ -124,6 +130,11 @@ window.addEventListener("DOMContentLoaded", () => {
   carregarTrilhaMaterias();
   atualizarStreak();
   atualizarResumo();
+  retomarGeracaoProvaAtiva();
+});
+
+window.addEventListener('study-progress-sync-error', () => {
+  mostrarToast('Seu progresso está neste dispositivo, mas não foi possível sincronizá-lo com sua conta.');
 });
 
 // poll conquistas periodically to show real-time notifications
@@ -729,6 +740,111 @@ function renderLoadingProva(container, tipo = 'Prova', mensagem = 'Gerando sua p
   `;
 }
 
+function aguardarGeracaoProva(jobId, container, tipo) {
+  const limite = Date.now() + 60 * 60 * 1000;
+  let falhasConsecutivas = 0;
+
+  return new Promise((resolve, reject) => {
+    const consultar = async () => {
+      if (Date.now() >= limite) {
+        reject(new Error('A geração ainda está em andamento. Recarregue a página e tente consultar novamente.'));
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API}/geracao-prova/${encodeURIComponent(jobId)}`, {
+          credentials: 'same-origin'
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (response.status === 400 || response.status === 404) {
+            localStorage.removeItem(ACTIVE_EXAM_JOB_KEY);
+          }
+          if ([429, 502, 503, 504].includes(response.status) && falhasConsecutivas < 5) {
+            falhasConsecutivas += 1;
+            const retryAfter = Number(response.headers.get('Retry-After'));
+            const delay = response.status === 429 && retryAfter > 0
+              ? retryAfter * 1000
+              : Math.min(15000, 3000 * falhasConsecutivas);
+            setTimeout(consultar, delay);
+            return;
+          }
+          reject(new Error(data.error || 'Não foi possível consultar a geração da prova.'));
+          return;
+        }
+
+        falhasConsecutivas = 0;
+        if (data.status === 'completed') {
+          localStorage.removeItem(ACTIVE_EXAM_JOB_KEY);
+          resolve(data);
+          return;
+        }
+        if (data.status === 'failed') {
+          localStorage.removeItem(ACTIVE_EXAM_JOB_KEY);
+          reject(new Error(data.error || 'A geração da prova falhou. Tente novamente.'));
+          return;
+        }
+
+        const mensagem = data.status === 'queued'
+          ? 'Sua solicitação está na fila. Aguarde um momento...'
+          : `Gerando questões... ${Number(data.progress || 0)}/90`;
+        renderLoadingProva(container, tipo, mensagem);
+        setTimeout(consultar, 12000);
+      } catch (error) {
+        if (falhasConsecutivas < 5) {
+          falhasConsecutivas += 1;
+          setTimeout(consultar, 2000 * falhasConsecutivas);
+          return;
+        }
+        reject(error);
+      }
+    };
+
+    consultar();
+  });
+}
+
+function apresentarProvaGerada(data, { containerId, finalizarId }) {
+  const questoesValidas = data.questoes.filter(ExamValidation.isValidStudentQuestion);
+  if (questoesValidas.length !== data.questoes.length) {
+    throw new Error('A prova gerada está incompleta ou inválida. Tente novamente.');
+  }
+  questoes = data.questoes;
+  provaId = data.prova_id;
+  respostasUser = {};
+  renderProva(data.questoes, containerId, finalizarId);
+}
+
+async function retomarGeracaoProvaAtiva() {
+  let saved;
+  try {
+    saved = JSON.parse(localStorage.getItem(ACTIVE_EXAM_JOB_KEY) || 'null');
+  } catch (error) {
+    localStorage.removeItem(ACTIVE_EXAM_JOB_KEY);
+    return;
+  }
+  if (!saved || !/^[0-9a-f-]{36}$/i.test(saved.jobId || '')) return;
+  if (!['enem-container', 'provao-container'].includes(saved.containerId)) return;
+
+  const container = el(saved.containerId);
+  const button = el(saved.botaoId);
+  const tipo = saved.containerId === 'enem-container' ? 'ENEM' : 'Provão Paulista';
+  if (!container) return;
+
+  if (button) button.disabled = true;
+  renderLoadingProva(container, tipo, 'Retomando a geração da sua prova...');
+  try {
+    const data = await aguardarGeracaoProva(saved.jobId, container, tipo);
+    apresentarProvaGerada(data, saved);
+  } catch (error) {
+    console.error(error);
+    container.innerHTML = `<div class="card">${escapeHtml(error.message || 'Erro ao gerar prova')}</div>`;
+    mostrarToast(error.message || 'Erro ao gerar prova');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 async function gerarProvaAluno({ endpoint, containerId, finalizarId, botaoId }) {
   const container = el(containerId);
   const botao = el(botaoId);
@@ -752,28 +868,30 @@ async function gerarProvaAluno({ endpoint, containerId, finalizarId, botaoId }) 
       headers: { Authorization: `Bearer ${token}` }
     });
 
-    const data = await res.json().catch(() => ({}));
+    let data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const message = res.status === 502 || res.status === 504
         ? 'A geração demorou mais que o limite do servidor. Tente novamente.'
         : data.error || "Nao foi possivel gerar a prova";
       throw new Error(message);
     }
+    if (res.status === 202 && data.job_id) {
+      const tipo = containerId === 'enem-container' ? 'ENEM' : 'Provão Paulista';
+      localStorage.setItem(ACTIVE_EXAM_JOB_KEY, JSON.stringify({
+        jobId: data.job_id,
+        containerId,
+        finalizarId,
+        botaoId
+      }));
+      renderLoadingProva(container, tipo, 'Sua solicitação está na fila. Aguarde um momento...');
+      data = await aguardarGeracaoProva(data.job_id, container, tipo);
+    }
     if (!data.prova_id || !Array.isArray(data.questoes) || data.questoes.length === 0) {
       throw new Error("A prova foi gerada sem questoes validas");
     }
 
-    const questoesValidas = data.questoes.filter(ExamValidation.isValidStudentQuestion);
-
-    if (questoesValidas.length < data.questoes.length) {
-      throw new Error('A prova gerada está incompleta ou inválida. Tente novamente.');
-    }
-
-    questoes = data.questoes;
-    provaId = data.prova_id;
-    respostasUser = {};
-
-    renderProva(data.questoes, containerId, finalizarId);
+    localStorage.removeItem(ACTIVE_EXAM_JOB_KEY);
+    apresentarProvaGerada(data, { containerId, finalizarId });
   } catch (error) {
     console.error(error);
     if (container) {
@@ -1019,6 +1137,7 @@ function normalizarMeta(meta) {
 function salvarPlanejamento() {
   localStorage.setItem('planoDia', JSON.stringify(planoDia));
   localStorage.setItem('metas', JSON.stringify(metas));
+  StudyProgress.scheduleSave();
 }
 
 function inicializarPlanejamento() {
@@ -1197,10 +1316,12 @@ function concluirMetasPorTipo(kind) {
 function salvarAtividades() {
   if (studyActivities.length > 5000) studyActivities = studyActivities.slice(-5000);
   localStorage.setItem(ACTIVITY_STORAGE_KEY, JSON.stringify(studyActivities));
+  StudyProgress.scheduleSave();
 }
 
 function recordStudyActivity(kind, minutes = 0) {
   studyActivities.push({
+    id: window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     date: StudyTracker.dateKey(),
     kind,
     minutes: Math.max(0, Math.min(1440, Math.round(Number(minutes) || 0)))

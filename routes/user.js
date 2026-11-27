@@ -1,5 +1,6 @@
 const fs = require('fs');
 const crypto = require('crypto');
+const { normalizeStudyProgress } = require('../services/studyProgress');
 
 function buildConquistaState({ provas = [], xp = 0, nivel = 1, lastActive = null, existing = [] } = {}) {
   const total = provas.length;
@@ -121,6 +122,44 @@ app.get("/me", auth, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Erro /me" });
+  }
+});
+
+app.get('/me/study-progress', auth, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT progress, updated_at
+      FROM study_progress
+      WHERE usuario_id = $1
+    `, [req.user.id]);
+    res.json({
+      progress: result.rows[0]?.progress || {},
+      updated_at: result.rows[0]?.updated_at || null
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Não foi possível carregar o progresso de estudo' });
+  }
+});
+
+app.put('/me/study-progress', auth, async (req, res) => {
+  const progress = normalizeStudyProgress(req.body);
+  if (!progress) {
+    return res.status(400).json({ error: 'Progresso de estudo inválido' });
+  }
+
+  try {
+    const result = await db.query(`
+      INSERT INTO study_progress(usuario_id, progress, updated_at)
+      VALUES($1, $2::jsonb, NOW())
+      ON CONFLICT(usuario_id)
+      DO UPDATE SET progress = EXCLUDED.progress, updated_at = NOW()
+      RETURNING updated_at
+    `, [req.user.id, JSON.stringify(progress)]);
+    res.json({ ok: true, updated_at: result.rows[0].updated_at });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Não foi possível salvar o progresso de estudo' });
   }
 });
 

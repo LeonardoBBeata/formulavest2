@@ -6,10 +6,171 @@ const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const ExcelJS = require('exceljs');
 const yauzl = require('yauzl');
-const { buildEnemQuestionPlan, createBatchesOfTen } = require('../utils/examState');
+const { generateExamQuestions, TOTAL_QUESTIONS } = require('../services/examGeneration');
 
 module.exports = function registerProvasRoutes(app, deps = {}) {
   const { PDFDocument, aiLimiter, auth, cache, chamarIA, db, extrairJSONSeguro } = deps;
+  const generationQueue = [];
+  const maxActiveGenerations = 2;
+  let activeGenerations = 0;
+
+  function retryGenerationJobLater(jobId) {
+    setTimeout(async () => {
+      try {
+        const result = await db.query(`
+          UPDATE exam_generation_jobs
+          SET status = 'queued', progress = 0, error_message = NULL, updated_at = NOW()
+          WHERE id = $1 AND status IN ('queued', 'running')
+          RETURNING id
+        `, [jobId]);
+        if (result.rows.length) {
+          generationQueue.push(jobId);
+          startGenerationWorker();
+        }
+      } catch (error) {
+        console.error('Não foi possível retomar a geração após uma falha de banco:', error);
+        retryGenerationJobLater(jobId);
+      }
+    }, 15000);
+  }
+
+  function startGenerationWorker() {
+    while (activeGenerations < maxActiveGenerations && generationQueue.length) {
+      const jobId = generationQueue.shift();
+      activeGenerations += 1;
+      void processGenerationJob(jobId)
+        .catch(error => {
+          console.error('Falha ao processar geração de prova:', error);
+          retryGenerationJobLater(jobId);
+        })
+        .finally(() => {
+          activeGenerations -= 1;
+          startGenerationWorker();
+        });
+    }
+  }
+
+  async function processGenerationJob(jobId) {
+    const claimed = await db.query(`
+      UPDATE exam_generation_jobs
+      SET status = 'running', progress = 0, error_message = NULL, updated_at = NOW()
+      WHERE id = $1 AND status = 'queued'
+      RETURNING usuario_id, tipo
+    `, [jobId]);
+    if (!claimed.rows.length) return;
+
+    const { usuario_id: userId, tipo } = claimed.rows[0];
+    try {
+      const generated = await generateExamQuestions({
+        type: tipo,
+        chamarIA,
+        extrairJSONSeguro,
+        validarQuestao: validarQuestaoGerada,
+        onProgress: async progress => {
+          await db.query(`
+            UPDATE exam_generation_jobs
+            SET progress = $2, updated_at = NOW()
+            WHERE id = $1 AND status = 'running'
+          `, [jobId, progress]);
+        }
+      });
+      const questions = normalizarQuestoesGeradas(generated);
+      if (questions.length !== TOTAL_QUESTIONS) {
+        throw new Error(`Prova incompleta após normalização: ${questions.length}/${TOTAL_QUESTIONS}`);
+      }
+
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+        const result = await client.query(`
+          INSERT INTO provas_ativas(usuario_id, questoes)
+          VALUES($1, $2)
+          RETURNING id
+        `, [userId, JSON.stringify(questions)]);
+        await client.query(`
+          UPDATE exam_generation_jobs
+          SET status = 'completed', progress = $2, prova_id = $3, updated_at = NOW()
+          WHERE id = $1 AND status = 'running'
+        `, [jobId, TOTAL_QUESTIONS, result.rows[0].id]);
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw error;
+      } finally {
+        client.release();
+      }
+    } catch (error) {
+      console.error(`Geração de prova ${jobId} falhou:`, error);
+      await db.query(`
+        UPDATE exam_generation_jobs
+        SET status = 'failed',
+            error_message = 'A IA não conseguiu completar a prova. Tente novamente.',
+            updated_at = NOW()
+        WHERE id = $1 AND status = 'running'
+      `, [jobId]);
+    }
+  }
+
+  async function queueExamGeneration(userId, type) {
+    const active = await db.query(`
+      SELECT id, tipo
+      FROM exam_generation_jobs
+      WHERE usuario_id = $1 AND status IN ('queued', 'running')
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, [userId]);
+    if (active.rows.length) {
+      if (active.rows[0].tipo !== type) {
+        const error = new Error('Você já tem outra geração de prova em andamento.');
+        error.status = 409;
+        throw error;
+      }
+      return active.rows[0].id;
+    }
+
+    const jobId = crypto.randomUUID();
+    try {
+      await db.query(`
+        INSERT INTO exam_generation_jobs(id, usuario_id, tipo)
+        VALUES($1, $2, $3)
+      `, [jobId, userId, type]);
+    } catch (error) {
+      if (error.code !== '23505') throw error;
+      const current = await db.query(`
+        SELECT id, tipo
+        FROM exam_generation_jobs
+        WHERE usuario_id = $1 AND status IN ('queued', 'running')
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [userId]);
+      if (!current.rows.length) throw error;
+      if (current.rows[0].tipo !== type) {
+        const conflict = new Error('Você já tem outra geração de prova em andamento.');
+        conflict.status = 409;
+        throw conflict;
+      }
+      return current.rows[0].id;
+    }
+    generationQueue.push(jobId);
+    startGenerationWorker();
+    return jobId;
+  }
+
+  app.locals.resumeExamGenerationJobs = async () => {
+    await db.query(`
+      DELETE FROM exam_generation_jobs
+      WHERE status IN ('completed', 'failed')
+        AND created_at < NOW() - INTERVAL '30 days'
+    `);
+    const result = await db.query(`
+      UPDATE exam_generation_jobs
+      SET status = 'queued', progress = 0, error_message = NULL, updated_at = NOW()
+      WHERE status IN ('queued', 'running')
+      RETURNING id
+    `);
+    generationQueue.push(...result.rows.map(row => row.id));
+    startGenerationWorker();
+  };
 
 function gerarCodigoProva() {
   // Six bytes provide far more entropy than Math.random-derived room codes.
@@ -322,67 +483,12 @@ function canAccessSchool(user, escolaId, empresaId) {
 // ======================
 app.post('/gerar-provao', auth, aiLimiter, async (req, res) => {
   try {
-    const totalQuestoes = 90;
-    const lotes = createBatchesOfTen(totalQuestoes, 10);
-    const lotesGerados = await Promise.all(lotes.map(async lote => {
-      const resposta = await chamarIA(`
-Crie ${lote.size} questões inéditas estilo Provão Paulista em formato de bloco de 10 questões.
-As questões devem ser variadas e consistentes com o nível do ensino médio.
-
-RETORNE SOMENTE JSON:
-{
-  "questoes":[
-    {
-      "enunciado":"",
-      "materia":"",
-      "opcoes":{
-        "A":"",
-        "B":"",
-        "C":"",
-        "D":"",
-        "E":""
-      },
-      "correta":"A"
-    }
-  ]
-}
-`, undefined, { timeoutMs: 10000 });
-      const json = extrairJSONSeguro(resposta);
-      if (!json?.questoes || !Array.isArray(json.questoes) || json.questoes.length === 0) {
-        return [];
-      }
-
-      return json.questoes.slice(0, lote.size);
-    }));
-    const todasQuestoes = lotesGerados.flat();
-
-    if (todasQuestoes.length < totalQuestoes) {
-      return res.status(500).json({ error: 'Não foi possível completar o Provão Paulista com 90 questões.' });
-    }
-
-    const provasFinal = normalizarQuestoesGeradas(todasQuestoes.slice(0, totalQuestoes));
-    if (provasFinal.length < totalQuestoes) {
-      return res.status(500).json({ error: 'O Provão Paulista gerado contém questões inválidas.' });
-    }
-
-    const result = await db.query(`
-      INSERT INTO provas_ativas(usuario_id, questoes)
-      VALUES($1, $2)
-      RETURNING id
-    `, [req.user.id, JSON.stringify(provasFinal)]);
-
-    const provaId = result.rows[0].id;
-
-    res.json({
-      prova_id: provaId,
-      questoes: removerGabarito(provasFinal)
-    });
-
+    const jobId = await queueExamGeneration(req.user.id, 'provao');
+    res.status(202).json({ job_id: jobId, status: 'queued', progress: 0 });
   } catch (err) {
-    console.error(err);
-
-    res.status(500).json({
-      error: 'Erro gerar Provão'
+    if (err.status !== 409) console.error(err);
+    res.status(err.status || 500).json({
+      error: err.status === 409 ? err.message : 'Não foi possível iniciar a geração do Provão Paulista.'
     });
   }
 });
@@ -740,93 +846,59 @@ RETORNE SOMENTE JSON VALIDO:
 // ======================
 app.post('/gerar-enem', auth, aiLimiter, async (req, res) => {
   try {
-    const totalAlvo = 90;
-    const plan = buildEnemQuestionPlan(totalAlvo, 10);
-    const materiaLabels = {
-      linguagens: 'Linguagens e Códigos',
-      humanas: 'Ciências Humanas',
-      natureza: 'Ciências da Natureza',
-      matematica: 'Matemática'
-    };
+    const jobId = await queueExamGeneration(req.user.id, 'enem');
+    res.status(202).json({ job_id: jobId, status: 'queued', progress: 0 });
+  } catch (err) {
+    if (err.status !== 409) console.error(err);
+    res.status(err.status || 500).json({
+      error: err.status === 409 ? err.message : 'Não foi possível iniciar a geração do ENEM.'
+    });
+  }
+});
 
-    const lotesGerados = await Promise.all(plan.batches.map(async lote => {
-      const qtd = lote.size;
-      const materiaResumo = Object.entries(lote.subjectCounts)
-        .map(([materia, quantidade]) => `${materia}: ${quantidade}`)
-        .join('; ');
+app.get('/geracao-prova/:jobId', auth, async (req, res) => {
+  const jobId = String(req.params.jobId || '');
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(jobId)) {
+    return res.status(400).json({ error: 'Identificador de geração inválido' });
+  }
 
-      const resposta = await chamarIA(`
-Crie um lote de ${qtd} questões inéditas estilo ENEM.
-Distribuição exata deste bloco: ${materiaResumo}
-
-Importante: o resultado final da prova deve chegar a ${totalAlvo} questões e manter a divisão real do ENEM por área.
-
-RETORNE SOMENTE JSON:
-{
-  "questoes":[
-    {
-      "enunciado":"",
-      "materia":"",
-      "opcoes":{
-        "A":"",
-        "B":"",
-        "C":"",
-        "D":"",
-        "E":""
-      },
-      "correta":"A"
-    }
-  ]
-}
-`, undefined, { timeoutMs: 10000 });
-      const json = extrairJSONSeguro(resposta);
-      if (!json?.questoes || !Array.isArray(json.questoes) || json.questoes.length === 0) {
-        return [];
-      }
-
-      const subjectOrder = [];
-      Object.entries(lote.subjectCounts).forEach(([materia, quantidade]) => {
-        for (let i = 0; i < quantidade; i += 1) {
-          subjectOrder.push(materia);
-        }
-      });
-
-      return json.questoes.slice(0, qtd).map((questao, idx) => {
-        const materiaKey = subjectOrder[idx] || 'linguagens';
-        return {
-          ...questao,
-          materia: String(questao.materia || materiaLabels[materiaKey] || 'Linguagens e Códigos').trim() || materiaLabels[materiaKey] || 'Linguagens e Códigos'
-        };
-      });
-    }));
-    const todasQuestoes = lotesGerados.flat();
-
-    if (todasQuestoes.length < totalAlvo) {
-      return res.status(500).json({ error: 'Não foi possível completar o ENEM com 90 questões.' });
-    }
-
-    const finalQuestoes = normalizarQuestoesGeradas(todasQuestoes.slice(0, totalAlvo));
-    if (finalQuestoes.length < totalAlvo) {
-      return res.status(500).json({ error: 'O ENEM gerado contém questões inválidas.' });
-    }
-
+  try {
     const result = await db.query(`
-      INSERT INTO provas_ativas(usuario_id, questoes)
-      VALUES($1, $2)
-      RETURNING id
-    `, [req.user.id, JSON.stringify(finalQuestoes)]);
+      SELECT id, status, progress, prova_id, error_message
+      FROM exam_generation_jobs
+      WHERE id = $1 AND usuario_id = $2
+    `, [jobId, req.user.id]);
+    const job = result.rows[0];
+    if (!job) return res.status(404).json({ error: 'Geração não encontrada' });
 
-    const provaId = result.rows[0].id;
+    if (job.status !== 'completed') {
+      return res.json({
+        job_id: job.id,
+        status: job.status,
+        progress: Number(job.progress || 0),
+        error: job.error_message || undefined
+      });
+    }
+
+    const exam = await db.query(`
+      SELECT questoes
+      FROM provas_ativas
+      WHERE id = $1 AND usuario_id = $2
+    `, [job.prova_id, req.user.id]);
+    if (!exam.rows.length || !Array.isArray(exam.rows[0].questoes)) {
+      return res.status(500).json({ error: 'A prova gerada não está disponível. Tente novamente.' });
+    }
 
     res.json({
-      prova_id: provaId,
-      questoes: removerGabarito(finalQuestoes)
+      job_id: job.id,
+      status: 'completed',
+      progress: Number(job.progress || TOTAL_QUESTIONS),
+      prova_id: job.prova_id,
+      questoes: removerGabarito(exam.rows[0].questoes)
     });
-
   } catch (err) {
     console.error(err);
-
-    res.status(500).json({ error: 'Erro ENEM' });
+    res.status(500).json({ error: 'Não foi possível consultar a geração da prova' });
   }
 });
 

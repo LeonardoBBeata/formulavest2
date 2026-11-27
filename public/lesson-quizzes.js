@@ -331,6 +331,7 @@
   function saveProgress(progress) {
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+      window.StudyProgress.scheduleSave();
       return true;
     } catch (error) {
       console.error('Não foi possível salvar o progresso das lições.', error);
@@ -468,7 +469,8 @@
     });
   }
 
-  function inicializarLicoes() {
+  async function inicializarLicoes() {
+    await window.StudyProgress.load();
     const section = document.getElementById('licoes');
     if (!section) return;
 
