@@ -324,9 +324,7 @@ app.post('/gerar-provao', auth, aiLimiter, async (req, res) => {
   try {
     const totalQuestoes = 90;
     const lotes = createBatchesOfTen(totalQuestoes, 10);
-    const todasQuestoes = [];
-
-    for (const lote of lotes) {
+    const lotesGerados = await Promise.all(lotes.map(async lote => {
       const resposta = await chamarIA(`
 Crie ${lote.size} questões inéditas estilo Provão Paulista em formato de bloco de 10 questões.
 As questões devem ser variadas e consistentes com o nível do ensino médio.
@@ -348,15 +346,15 @@ RETORNE SOMENTE JSON:
     }
   ]
 }
-`);
-
+`, undefined, { timeoutMs: 10000 });
       const json = extrairJSONSeguro(resposta);
       if (!json?.questoes || !Array.isArray(json.questoes) || json.questoes.length === 0) {
-        continue;
+        return [];
       }
 
-      todasQuestoes.push(...json.questoes.slice(0, lote.size));
-    }
+      return json.questoes.slice(0, lote.size);
+    }));
+    const todasQuestoes = lotesGerados.flat();
 
     if (todasQuestoes.length < totalQuestoes) {
       return res.status(500).json({ error: 'Não foi possível completar o Provão Paulista com 90 questões.' });
@@ -744,7 +742,6 @@ app.post('/gerar-enem', auth, aiLimiter, async (req, res) => {
   try {
     const totalAlvo = 90;
     const plan = buildEnemQuestionPlan(totalAlvo, 10);
-    const todasQuestoes = [];
     const materiaLabels = {
       linguagens: 'Linguagens e Códigos',
       humanas: 'Ciências Humanas',
@@ -752,11 +749,8 @@ app.post('/gerar-enem', auth, aiLimiter, async (req, res) => {
       matematica: 'Matemática'
     };
 
-    let loteIndex = 0;
-    while (todasQuestoes.length < totalAlvo && loteIndex < plan.batches.length + 10) {
-      const lote = plan.batches[Math.min(loteIndex, plan.batches.length - 1)];
-      const restante = totalAlvo - todasQuestoes.length;
-      const qtd = Math.min(lote.size, restante);
+    const lotesGerados = await Promise.all(plan.batches.map(async lote => {
+      const qtd = lote.size;
       const materiaResumo = Object.entries(lote.subjectCounts)
         .map(([materia, quantidade]) => `${materia}: ${quantidade}`)
         .join('; ');
@@ -784,12 +778,10 @@ RETORNE SOMENTE JSON:
     }
   ]
 }
-`);
-
+`, undefined, { timeoutMs: 10000 });
       const json = extrairJSONSeguro(resposta);
       if (!json?.questoes || !Array.isArray(json.questoes) || json.questoes.length === 0) {
-        loteIndex += 1;
-        continue;
+        return [];
       }
 
       const subjectOrder = [];
@@ -799,17 +791,15 @@ RETORNE SOMENTE JSON:
         }
       });
 
-      const loteQuestoes = json.questoes.slice(0, qtd).map((questao, idx) => {
+      return json.questoes.slice(0, qtd).map((questao, idx) => {
         const materiaKey = subjectOrder[idx] || 'linguagens';
         return {
           ...questao,
           materia: String(questao.materia || materiaLabels[materiaKey] || 'Linguagens e Códigos').trim() || materiaLabels[materiaKey] || 'Linguagens e Códigos'
         };
       });
-
-      todasQuestoes.push(...loteQuestoes);
-      loteIndex += 1;
-    }
+    }));
+    const todasQuestoes = lotesGerados.flat();
 
     if (todasQuestoes.length < totalAlvo) {
       return res.status(500).json({ error: 'Não foi possível completar o ENEM com 90 questões.' });

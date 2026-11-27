@@ -202,7 +202,7 @@ function gerarRespostaFallback(prompt = '') {
   return JSON.stringify({ questoes });
 }
 
-async function chamarIA(prompt, modelos = obterModelos()) {
+async function chamarIA(prompt, modelos = obterModelos(), options = {}) {
   const apiKey = String(process.env.OPENROUTER_API_KEY || '').trim();
 
   if (!apiKey) {
@@ -252,7 +252,7 @@ async function chamarIA(prompt, modelos = obterModelos()) {
             'HTTP-Referer': process.env.APP_URL || process.env.RENDER_EXTERNAL_URL || 'https://formulavest.onrender.com',
             'X-Title': 'FormulaVest'
           },
-          timeout: 120000
+          timeout: options.timeoutMs || 120000
         }
       );
 

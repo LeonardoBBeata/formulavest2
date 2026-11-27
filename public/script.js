@@ -753,7 +753,12 @@ async function gerarProvaAluno({ endpoint, containerId, finalizarId, botaoId }) 
     });
 
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "Nao foi possivel gerar a prova");
+    if (!res.ok) {
+      const message = res.status === 502 || res.status === 504
+        ? 'A geração demorou mais que o limite do servidor. Tente novamente.'
+        : data.error || "Nao foi possivel gerar a prova";
+      throw new Error(message);
+    }
     if (!data.prova_id || !Array.isArray(data.questoes) || data.questoes.length === 0) {
       throw new Error("A prova foi gerada sem questoes validas");
     }

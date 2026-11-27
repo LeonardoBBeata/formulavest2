@@ -48,6 +48,18 @@ describe('OpenRouter fallback', () => {
     expect(axios.post.mock.calls[1][1].model).toBe('google/gemma-4-31b-it:free');
   });
 
+  test('respeita o limite de tempo fornecido pelo chamador', async () => {
+    axios.post.mockResolvedValue({
+      data: {
+        choices: [{ message: { content: '{"ok": true}' } }]
+      }
+    });
+
+    await chamarIA('teste de prompt', ['baidu/ernie-5.5-flash-preview:free'], { timeoutMs: 10000 });
+
+    expect(axios.post.mock.calls[0][2].timeout).toBe(10000);
+  });
+
   test('remove vírgulas finais antes de interpretar JSON da IA', () => {
     const { extrairJSONSeguro } = require('../services/ia');
 
