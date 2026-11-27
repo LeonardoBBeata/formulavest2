@@ -240,6 +240,7 @@ async function chamarIA(prompt, modelos = obterModelos()) {
               content: prompt
             }
           ],
+          response_format: { type: 'json_object' },
           temperature: 0.2,
           top_p: 0.9,
           max_tokens: 4000
@@ -259,6 +260,9 @@ async function chamarIA(prompt, modelos = obterModelos()) {
       if (!texto) {
         throw new Error('IA retornou vazio');
       }
+      if (!extrairJSONSeguro(texto)) {
+        throw new Error('IA retornou JSON inválido');
+      }
 
       console.log('Resposta recebida da IA.');
       return texto;
@@ -271,7 +275,7 @@ async function chamarIA(prompt, modelos = obterModelos()) {
         continue;
       }
 
-      if (String(err.message).includes('IA retornou vazio')) {
+      if (/IA retornou (vazio|JSON inválido)/i.test(String(err.message))) {
         continue;
       }
     }
@@ -287,14 +291,62 @@ async function chamarIA(prompt, modelos = obterModelos()) {
 }
 
 function extrairJSONSeguro(texto) {
+  if (typeof texto !== 'string') return null;
+
+  const limpo = texto
+    .replace(/```(?:json)?/gi, '')
+    .replace(/```/g, '')
+    .trim();
+  const primeiroObjeto = limpo.indexOf('{');
+  const primeiroArray = limpo.indexOf('[');
+  let inicio = -1;
+
+  if (primeiroObjeto >= 0 && (primeiroArray < 0 || primeiroObjeto < primeiroArray)) inicio = primeiroObjeto;
+  else if (primeiroArray >= 0) inicio = primeiroArray;
+  if (inicio < 0) return null;
+
+  const abertura = limpo[inicio];
+  const fechamento = abertura === '{' ? '}' : ']';
+  let profundidade = 0;
+  let dentroString = false;
+  let escapado = false;
+  let fim = -1;
+
+  for (let index = inicio; index < limpo.length; index += 1) {
+    const caractere = limpo[index];
+    if (dentroString) {
+      if (escapado) {
+        escapado = false;
+      } else if (caractere === '\\') {
+        escapado = true;
+      } else if (caractere === '"') {
+        dentroString = false;
+      }
+      continue;
+    }
+    if (caractere === '"') {
+      dentroString = true;
+    } else if (caractere === abertura) {
+      profundidade += 1;
+    } else if (caractere === fechamento) {
+      profundidade -= 1;
+      if (profundidade === 0) {
+        fim = index + 1;
+        break;
+      }
+    }
+  }
+
+  if (fim < 0) return null;
+  const candidato = limpo
+    .slice(inicio, fim)
+    .replace(/,\s*([}\]])/g, '$1')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+
   try {
-    const match = texto.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-
-    if (!match) return null;
-
-    return JSON.parse(match[0]);
+    return JSON.parse(candidato);
   } catch (err) {
-    console.error('Erro ao extrair JSON:', err);
+    console.warn('Resposta da IA não pôde ser interpretada como JSON estruturado.', err.message);
     return null;
   }
 }

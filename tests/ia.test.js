@@ -25,6 +25,35 @@ describe('OpenRouter fallback', () => {
     expect(response).toBe('{"ok": true}');
     expect(axios.post).toHaveBeenCalledTimes(2);
     expect(axios.post.mock.calls[0][1].model).toBe('baidu/ernie-5.5-flash-preview:free');
+    expect(axios.post.mock.calls[0][1].response_format).toEqual({ type: 'json_object' });
+  });
+
+  test('tenta outro modelo quando a resposta não contém JSON válido', async () => {
+    axios.post
+      .mockResolvedValueOnce({
+        data: {
+          choices: [{ message: { content: '{"questoes": ]' } }]
+        }
+      })
+      .mockResolvedValueOnce({
+        data: {
+          choices: [{ message: { content: '{"ok": true}' } }]
+        }
+      });
+
+    const response = await chamarIA('teste de prompt');
+
+    expect(response).toBe('{"ok": true}');
+    expect(axios.post).toHaveBeenCalledTimes(2);
+    expect(axios.post.mock.calls[1][1].model).toBe('google/gemma-4-31b-it:free');
+  });
+
+  test('remove vírgulas finais antes de interpretar JSON da IA', () => {
+    const { extrairJSONSeguro } = require('../services/ia');
+
+    expect(extrairJSONSeguro('```json\n{"questoes":[{"enunciado":"Pergunta",}],}\n```')).toEqual({
+      questoes: [{ enunciado: 'Pergunta' }]
+    });
   });
 
   test('deve manter um conjunto de modelos válidos como fallback', () => {
